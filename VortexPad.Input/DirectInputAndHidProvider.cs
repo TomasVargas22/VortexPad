@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using HidSharp;
 using Vortice.DirectInput;
+using VortexPad.Core.Hid;
 using VortexPad.Core.Models;
 
 namespace VortexPad.Input;
@@ -13,18 +14,26 @@ public sealed record DetectedPhysicalDevice(
     string DeviceInstancePath,
     bool IsDirectInput,
     bool IsHid,
-    Guid DirectInputGuid);
+    Guid DirectInputGuid)
+{
+    /// <summary>DualSense / DualSense Edge read over native HID (correct mapping + gyro), not DirectInput.</summary>
+    public bool IsNativeDualSense { get; init; }
+}
 
 public sealed class DirectInputAndHidProvider : IDisposable
 {
     private IDirectInput8? _directInput;
     private IDirectInputDevice8? _activeDInputDevice;
     private Guid _activeDeviceGuid;
+    private DualSenseHidReader? _dualSenseReader;
     private readonly object _sync = new();
 
     // Optional manual/simulated override for live interactive testing in UI when no controller is plugged in
     public bool EnableInteractiveDemoSignal { get; set; }
     private readonly Stopwatch _demoClock = Stopwatch.StartNew();
+
+    /// <summary>Status of the native HID reader, or null if the active device does not use it.</summary>
+    public string? NativeHidStatus => _dualSenseReader?.StatusText;
 
     public DirectInputAndHidProvider()
     {
@@ -80,9 +89,41 @@ public sealed class DirectInputAndHidProvider : IDisposable
         // 2. Enumerate HID gamepads via HidSharp (UsagePage 0x01 Generic Desktop, Usage 0x04 Joystick or 0x05 Gamepad)
         try
         {
+            // 2a. DualSense / Edge: native HID reading replaces the DirectInput entry
+            //     (DirectInput gives the wrong button order, swaps the right stick with the triggers and has no gyro).
+            var nativeDualSense = new List<DetectedPhysicalDevice>();
+            foreach (var hid in DeviceList.Local.GetHidDevices(DualSenseReportParser.SonyVendorId))
+            {
+                if (!DualSenseReportParser.IsDualSense(hid.VendorID, hid.ProductID)) continue;
+                if (SafeGetMaxInputLength(hid) < 64) continue; // only the gamepad interface
+
+                string name = SafeGetProductName(hid);
+                nativeDualSense.Add(new DetectedPhysicalDevice(
+                    UniqueId: $"hid-native-{hid.DevicePath}",
+                    DisplayName: $"{name} [HID nativo]",
+                    VendorId: hid.VendorID,
+                    ProductId: hid.ProductID,
+                    DeviceInstancePath: hid.DevicePath,
+                    IsDirectInput: false,
+                    IsHid: true,
+                    DirectInputGuid: Guid.Empty)
+                {
+                    IsNativeDualSense = true
+                });
+            }
+
+            if (nativeDualSense.Count > 0)
+            {
+                results.RemoveAll(r => r.IsDirectInput && DualSenseReportParser.IsDualSense(r.VendorId, r.ProductId));
+                results.InsertRange(0, nativeDualSense);
+            }
+
+            // 2b. Other Sony (DualShock 4) and Nintendo pads: listing only, read through DirectInput
             foreach (var hid in DeviceList.Local.GetHidDevices())
             {
-                if (hid.VendorID == 0x054C || // Sony DualShock / DualSense
+                if (DualSenseReportParser.IsDualSense(hid.VendorID, hid.ProductID)) continue;
+
+                if (hid.VendorID == 0x054C || // Sony DualShock 4
                     hid.VendorID == 0x057E)   // Nintendo Switch Pro
                 {
                     bool alreadyAdded = results.Any(r => r.VendorId == hid.VendorID && r.ProductId == hid.ProductID);
@@ -126,6 +167,15 @@ public sealed class DirectInputAndHidProvider : IDisposable
         lock (_sync)
         {
             ReleaseActiveDInputDevice();
+            ReleaseDualSenseReader();
+
+            if (device is { IsNativeDualSense: true })
+            {
+                _dualSenseReader = new DualSenseHidReader(device.DeviceInstancePath);
+                _dualSenseReader.Start();
+                _activeDeviceGuid = Guid.Empty;
+                return true;
+            }
 
             if (device == null || !device.IsDirectInput || device.DirectInputGuid == Guid.Empty || _directInput == null)
             {
@@ -163,6 +213,14 @@ public sealed class DirectInputAndHidProvider : IDisposable
         if (EnableInteractiveDemoSignal || selectedDevice?.UniqueId == "vortexpad-virtual-test-pad")
         {
             PopulateDemoSignal(state);
+            return state;
+        }
+
+        var reader = _dualSenseReader;
+        if (reader != null)
+        {
+            // Non-blocking: copies the latest report parsed by the reader thread
+            reader.CopyLatestInto(state);
             return state;
         }
 
@@ -282,6 +340,18 @@ public sealed class DirectInputAndHidProvider : IDisposable
         return $"HID Controller ({hid.VendorID:X4}:{hid.ProductID:X4})";
     }
 
+    private static int SafeGetMaxInputLength(HidDevice hid)
+    {
+        try { return hid.GetMaxInputReportLength(); }
+        catch { return 0; }
+    }
+
+    private void ReleaseDualSenseReader()
+    {
+        _dualSenseReader?.Dispose();
+        _dualSenseReader = null;
+    }
+
     private void ReleaseActiveDInputDevice()
     {
         if (_activeDInputDevice != null)
@@ -297,6 +367,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
         lock (_sync)
         {
             ReleaseActiveDInputDevice();
+            ReleaseDualSenseReader();
             _directInput?.Dispose();
             _directInput = null;
         }
