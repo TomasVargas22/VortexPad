@@ -27,6 +27,9 @@ public partial class MainWindow : Window
     private readonly ForegroundGameWatcher _gameWatcher = new();
     private readonly SmartMapperAndCalibrator _aiAssistant = new();
     private readonly MacroAndTurboEngine _pipelineEngine = new();
+    private readonly DriftCalibrationRecorder _driftRecorder = new(durationSeconds: 2.0);
+    private CancellationTokenSource? _calibrationSamplerCts;
+    private bool _calibrationUiActive;
     private readonly HighPrecisionPollingLoop _pollingLoop;
     private readonly DispatcherTimer _uiRefreshTimer;
 
@@ -314,6 +317,7 @@ public partial class MainWindow : Window
         var virtualOut = _virtualFrames.WriteBuffer;
 
         _pipelineEngine.ProcessFrame(physical, profile, deltaSeconds, virtualOut);
+        _driftRecorder.AddSample(physical, deltaSeconds); // returns immediately when not calibrating
 
         _vigemService.SubmitState(virtualOut);
         _kmInjector.ApplyOutput(virtualOut);
@@ -324,6 +328,8 @@ public partial class MainWindow : Window
 
     private void UpdateLiveVisualizerUi()
     {
+        UpdateCalibrationUi();
+
         var raw = _latestPhysical;
         var outState = _virtualFrames.ReadLatest();
 
@@ -624,19 +630,90 @@ public partial class MainWindow : Window
 
     private void BtnAiCalibrateDrift_Click(object sender, RoutedEventArgs e)
     {
-        var samples = new List<PhysicalInputState>(64);
-        for (int i = 0; i < 64; i++)
+        // The same button cancels an ongoing calibration
+        if (_calibrationUiActive)
         {
-            samples.Add(_inputProvider.PollCurrentState(_selectedDevice));
+            _driftRecorder.Cancel();
+            return;
         }
 
-        var result = _aiAssistant.CalibrateStickDrift(samples);
-        _activeProfile.LeftStick.InnerDeadzone = result.RecommendedLeftDeadzone;
-        _activeProfile.RightStick.InnerDeadzone = result.RecommendedRightDeadzone;
+        if (!_driftRecorder.Start()) return;
 
-        LoadProfileIntoUi(_activeProfile);
-        TxtAiCalibrationResult.Text = result.DiagnosticSummary;
-        TxtFooterStatus.Text = result.DiagnosticSummary;
+        _calibrationUiActive = true;
+        BtnAiCalibrateDrift.Content = "✖ Cancelar calibración";
+        BarCalibration.Value = 0;
+        BarCalibration.Visibility = Visibility.Visible;
+        TxtAiCalibrationResult.Text = $"Midiendo reposo durante {_driftRecorder.DurationSeconds:F0} s: no toques los sticks…";
+        EnsureCalibrationSampler();
+    }
+
+    /// <summary>
+    /// With emulation running, the 1000 Hz loop feeds the recorder. If it is stopped,
+    /// a temporary background sampler is used so you can calibrate without starting emulation.
+    /// </summary>
+    private void EnsureCalibrationSampler()
+    {
+        if (_pollingLoop.IsRunning || _calibrationSamplerCts != null) return;
+
+        var cts = new CancellationTokenSource();
+        _calibrationSamplerCts = cts;
+        var device = _selectedDevice;
+
+        Task.Run(() =>
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            double last = 0;
+            while (!cts.IsCancellationRequested && _driftRecorder.IsRecording && !_pollingLoop.IsRunning)
+            {
+                Thread.Sleep(1);
+                double now = clock.Elapsed.TotalSeconds;
+                _driftRecorder.AddSample(_inputProvider.PollCurrentState(device), now - last);
+                last = now;
+            }
+
+            // Lets a new sampler start if emulation stops again mid-measurement
+            Interlocked.CompareExchange(ref _calibrationSamplerCts, null, cts);
+        });
+    }
+
+    /// <summary>UI timer: updates the progress and applies the result when the measurement ends.</summary>
+    private void UpdateCalibrationUi()
+    {
+        if (!_calibrationUiActive) return;
+
+        BarCalibration.Value = _driftRecorder.Progress;
+        if (_driftRecorder.IsRecording)
+        {
+            EnsureCalibrationSampler(); // in case emulation was stopped mid-measurement
+            return;
+        }
+
+        _calibrationUiActive = false;
+        _calibrationSamplerCts?.Cancel();
+        _calibrationSamplerCts = null;
+        BtnAiCalibrateDrift.Content = "🎯 Auto-Calibrar Drift y Deadzone";
+        BarCalibration.Visibility = Visibility.Collapsed;
+
+        string message;
+        switch (_driftRecorder.Status)
+        {
+            case DriftCalibrationStatus.Completed:
+                var result = _driftRecorder.BuildResult(_aiAssistant)!;
+                _activeProfile.LeftStick.InnerDeadzone = result.RecommendedLeftDeadzone;
+                _activeProfile.RightStick.InnerDeadzone = result.RecommendedRightDeadzone;
+                LoadProfileIntoUi(_activeProfile); // also publishes the snapshot to the loop
+                message = result.DiagnosticSummary;
+                break;
+            case DriftCalibrationStatus.MovementDetected:
+                message = "Se detectó movimiento en un stick: suéltalos y vuelve a calibrar. No se cambió el perfil.";
+                break;
+            default:
+                message = "Calibración cancelada. No se cambió el perfil.";
+                break;
+        }
+
+        TxtAiCalibrationResult.Text = message;
+        TxtFooterStatus.Text = message;
     }
 
     private void BtnApplyAiGenre_Click(object sender, RoutedEventArgs e)
@@ -656,24 +733,31 @@ public partial class MainWindow : Window
         TxtFooterStatus.Text = summary;
     }
 
-    private async void BtnTriggerComboMacro_Click(object sender, RoutedEventArgs e)
+    private static readonly MacroDefinition UiComboMacro = new()
     {
-        ControllerButton[] combo = { ControllerButton.South, ControllerButton.East, ControllerButton.West, ControllerButton.North };
-        TxtFooterStatus.Text = "Ejecutando Macro Combo: A → B → X → Y...";
-
-        // Own copy: the loop's buffers are never touched from the UI.
-        // (Pending in Phase 4: inject the macro into the pipeline so the next tick does not overwrite it.)
-        var comboState = new VirtualOutputState();
-        comboState.CopyFrom(_virtualFrames.ReadLatest());
-        foreach (var btn in combo)
+        Id = "ui-combo-abxy",
+        Name = "Macro Combo A → B → X → Y",
+        TriggerButton = ControllerButton.None, // fired only from the UI
+        Steps =
         {
-            comboState.ActiveButtons.Add(btn);
-            _vigemService.SubmitState(comboState);
-            await Task.Delay(90);
-            comboState.ActiveButtons.Remove(btn);
-            _vigemService.SubmitState(comboState);
+            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.South, DurationMs = 90 },
+            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.East, DurationMs = 90 },
+            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.West, DurationMs = 90 },
+            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.North, DurationMs = 90 }
         }
-        TxtFooterStatus.Text = "Macro Combo completado.";
+    };
+
+    private void BtnTriggerComboMacro_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_pollingLoop.IsRunning)
+        {
+            TxtFooterStatus.Text = "Inicia la emulación para ejecutar la macro.";
+            return;
+        }
+
+        // Goes through the pipeline: the 1000 Hz loop runs it frame by frame, together with the physical input
+        _pipelineEngine.EnqueueMacro(UiComboMacro);
+        TxtFooterStatus.Text = "Macro Combo enviada al pipeline: A → B → X → Y.";
     }
 
     private async void BtnTestRumble_Click(object sender, RoutedEventArgs e)
@@ -736,6 +820,8 @@ public partial class MainWindow : Window
     private void OnMainWindowClosed(object? sender, EventArgs e)
     {
         _uiRefreshTimer.Stop();
+        _driftRecorder.Cancel();
+        _calibrationSamplerCts?.Cancel();
         _gameWatcher.Dispose();
         _pollingLoop.Dispose();
         _vigemService.Dispose();

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using VortexPad.Core.Models;
 using VortexPad.Core.Processing;
@@ -29,6 +30,11 @@ public sealed class MacroAndTurboEngine
     private ControllerProfile? _cachedProfile;
     private readonly TurboButtonConfig?[] _turboByButton = new TurboButtonConfig?[ButtonSlotCount];
     private byte _cachedLightR, _cachedLightG, _cachedLightB;
+    private string? _cachedProfileId;
+
+    // Macros fired from outside the loop (UI button, tray, etc.): the loop picks them up on its next frame
+    private readonly ConcurrentQueue<MacroDefinition> _queuedMacros = new();
+    private volatile bool _cancelMacrosRequested;
 
     private sealed class ActiveMacroExecution
     {
@@ -45,8 +51,32 @@ public sealed class MacroAndTurboEngine
         _activeMacros.Clear();
         _prevMacroTriggers.Clear();
         _gyroProcessor.Reset();
+        while (_queuedMacros.TryDequeue(out _)) { }
+        _cancelMacrosRequested = false;
         InvalidateProfileCache();
+        _cachedProfileId = null;
     }
+
+    /// <summary>
+    /// Fires a macro from outside the 1000 Hz loop (e.g. a UI button). Thread-safe and non-blocking:
+    /// it starts on the next frame and goes through the normal pipeline, so it is not overwritten by the next tick.
+    /// If a macro with the same <see cref="MacroDefinition.Id"/> is already running, it restarts.
+    /// </summary>
+    public void EnqueueMacro(MacroDefinition macro)
+    {
+        ArgumentNullException.ThrowIfNull(macro);
+        if (macro.Steps.Count == 0) return;
+        _queuedMacros.Enqueue(macro);
+    }
+
+    /// <summary>Cancels every running macro on the next frame (releases their buttons and keys). Thread-safe.</summary>
+    public void RequestCancelAllMacros()
+    {
+        _cancelMacrosRequested = true;
+    }
+
+    /// <summary>Number of running macros (diagnostics/tests; read from the loop thread).</summary>
+    public int ActiveMacroCount => _activeMacros.Count;
 
     /// <summary>
     /// Forces the precomputed data (turbo per button, lightbar color) to be rebuilt on the next frame.
@@ -61,6 +91,16 @@ public sealed class MacroAndTurboEngine
     private void EnsureProfileCache(ControllerProfile profile)
     {
         if (ReferenceEquals(profile, _cachedProfile)) return;
+
+        // A different profile (not just a new snapshot of the same one): its macros and turbos no longer apply.
+        // Without this, a macro that was halfway through would keep its buttons held after the profile switch.
+        // _prevMacroTriggers is kept so that a button already held does not fire the new profile's macro.
+        if (_cachedProfileId != null && !string.Equals(_cachedProfileId, profile.Id, StringComparison.Ordinal))
+        {
+            _activeMacros.Clear();
+            _turboPhaseSeconds.Clear();
+        }
+        _cachedProfileId = profile.Id;
 
         Array.Clear(_turboByButton);
         foreach (var turbo in profile.TurboConfigs)
@@ -252,6 +292,23 @@ public sealed class MacroAndTurboEngine
         VirtualOutputState output)
     {
         double deltaMs = Math.Max(0.0, deltaSeconds * 1000.0);
+
+        if (_cancelMacrosRequested)
+        {
+            _cancelMacrosRequested = false;
+            _activeMacros.Clear();
+        }
+
+        // Macros fired from the UI (only allocate on the frame they start)
+        while (_queuedMacros.TryDequeue(out var queued))
+        {
+            _activeMacros[queued.Id] = new ActiveMacroExecution
+            {
+                Definition = queued,
+                CurrentStepIndex = 0,
+                StepElapsedMs = 0
+            };
+        }
 
         foreach (var macro in profile.Macros)
         {

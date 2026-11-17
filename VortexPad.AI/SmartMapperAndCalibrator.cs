@@ -112,21 +112,55 @@ public sealed class SmartMapperAndCalibrator
                 "Sin muestras de entrada; usando deadzone segura del 6%.");
         }
 
-        double maxLeftRad = 0;
-        double maxRightRad = 0;
         var leftRadii = new double[restingSamples.Count];
         var rightRadii = new double[restingSamples.Count];
 
         for (int i = 0; i < restingSamples.Count; i++)
         {
             var s = restingSamples[i];
-            double lr = Math.Sqrt((s.LX * s.LX) + (s.LY * s.LY));
-            double rr = Math.Sqrt((s.RX * s.RX) + (s.RY * s.RY));
-            leftRadii[i] = lr;
-            rightRadii[i] = rr;
-            if (lr > maxLeftRad) maxLeftRad = lr;
-            if (rr > maxRightRad) maxRightRad = rr;
+            leftRadii[i] = Math.Sqrt((s.LX * s.LX) + (s.LY * s.LY));
+            rightRadii[i] = Math.Sqrt((s.RX * s.RX) + (s.RY * s.RY));
         }
+
+        return CalibrateFromRadii(leftRadii, rightRadii);
+    }
+
+    /// <summary>
+    /// Same as <see cref="CalibrateStickDrift(IReadOnlyList{PhysicalInputState})"/> but from axes already recorded
+    /// (e.g. by <see cref="DriftCalibrationRecorder"/>). All four spans must have the same length.
+    /// </summary>
+    public DriftCalibrationResult CalibrateStickDrift(
+        ReadOnlySpan<double> lx, ReadOnlySpan<double> ly, ReadOnlySpan<double> rx, ReadOnlySpan<double> ry)
+    {
+        int n = lx.Length;
+        if (ly.Length != n || rx.Length != n || ry.Length != n)
+        {
+            throw new ArgumentException("Los cuatro ejes deben tener la misma cantidad de muestras.");
+        }
+
+        if (n == 0)
+        {
+            return new DriftCalibrationResult(
+                0.0, 0.0, 0.0, 0.0, 0.06, 0.06,
+                "Sin muestras de entrada; usando deadzone segura del 6%.");
+        }
+
+        var leftRadii = new double[n];
+        var rightRadii = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            leftRadii[i] = Math.Sqrt((lx[i] * lx[i]) + (ly[i] * ly[i]));
+            rightRadii[i] = Math.Sqrt((rx[i] * rx[i]) + (ry[i] * ry[i]));
+        }
+
+        return CalibrateFromRadii(leftRadii, rightRadii);
+    }
+
+    private static DriftCalibrationResult CalibrateFromRadii(double[] leftRadii, double[] rightRadii)
+    {
+        double maxLeftRad = leftRadii.Max();
+        double maxRightRad = rightRadii.Max();
+        int sampleCount = leftRadii.Length;
 
         double leftStd = ComputeStdDev(leftRadii);
         double rightStd = ComputeStdDev(rightRadii);
@@ -136,7 +170,7 @@ public sealed class SmartMapperAndCalibrator
         double recRight = Math.Clamp(Math.Round(maxRightRad + (3.0 * rightStd) + 0.015, 3), 0.02, 0.35);
 
         string summary =
-            $"Auto-calibración completada ({restingSamples.Count} muestras): " +
+            $"Auto-calibración completada ({sampleCount} muestras): " +
             $"Drift Izq={maxLeftRad * 100:F1}% (±{leftStd * 100:F2}%) → Deadzone {recLeft * 100:F1}% | " +
             $"Drift Der={maxRightRad * 100:F1}% (±{rightStd * 100:F2}%) → Deadzone {recRight * 100:F1}%.";
 

@@ -146,7 +146,8 @@
                         <Border Background="#18122B" BorderBrush="#9D4EDD" BorderThickness="1" CornerRadius="8" Padding="10">
                             <StackPanel>
                                 <TextBlock Text="✨ VORTEXPAD AI ASSISTANT" FontSize="12" FontWeight="Bold" Foreground="#C77DFF" Margin="0,0,0,6"/>
-                                <Button Style="{StaticResource FluentButton}" Click="BtnAiCalibrateDrift_Click" Margin="0,0,0,8" Content="🎯 Auto-Calibrar Drift y Deadzone"/>
+                                <Button x:Name="BtnAiCalibrateDrift" Style="{StaticResource FluentButton}" Click="BtnAiCalibrateDrift_Click" Margin="0,0,0,4" Content="🎯 Auto-Calibrar Drift y Deadzone"/>
+                                <ProgressBar x:Name="BarCalibration" Minimum="0" Maximum="1" Height="6" Foreground="#C77DFF" Background="#1E293B" Margin="0,0,0,8" Visibility="Collapsed"/>
                                 <TextBlock Text="Optimización AI por Género:" FontSize="11" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,4"/>
                                 <Grid Margin="0,0,0,6">
                                     <Grid.ColumnDefinitions>
