@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using VortexPad.Core.Diagnostics;
 
 namespace VortexPad.Emulation;
 
@@ -81,13 +82,16 @@ public sealed class HidHideIntegrationService : IDisposable
                     IsDeviceCurrentlyCloaked = true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 // Corrupt file: nothing to recover
+                VortexLog.Warn("HidHide", "El archivo de sesión de HidHide estaba dañado; no se pudo recuperar.", ex);
             }
 
+            string recovered = string.Join(", ", _hiddenByUs);
             RestoreCore();
             StatusText = "HidHide: restaurado el mando que quedó oculto en la sesión anterior";
+            VortexLog.Warn("HidHide", $"La sesión anterior terminó con el mando oculto; restaurado ({recovered}).");
         }
     }
 
@@ -119,6 +123,7 @@ public sealed class HidHideIntegrationService : IDisposable
                     if (reg.ExitCode != 0)
                     {
                         StatusText = DescribeFailure("registrar VortexPad en la lista blanca", reg);
+                        VortexLog.Error("HidHide", StatusText);
                         return false;
                     }
                 }
@@ -133,6 +138,7 @@ public sealed class HidHideIntegrationService : IDisposable
                     if (result.ExitCode != 0)
                     {
                         StatusText = DescribeFailure($"ocultar {id}", result);
+                        VortexLog.Error("HidHide", StatusText);
                         RestoreCore();
                         return false;
                     }
@@ -146,6 +152,7 @@ public sealed class HidHideIntegrationService : IDisposable
                     if (cloak.ExitCode != 0)
                     {
                         StatusText = DescribeFailure("activar el ocultamiento", cloak);
+                        VortexLog.Error("HidHide", StatusText);
                         RestoreCore();
                         return false;
                     }
@@ -162,6 +169,7 @@ public sealed class HidHideIntegrationService : IDisposable
             catch (Exception ex)
             {
                 StatusText = $"No se pudo activar HidHide: {ex.Message}";
+                VortexLog.Error("HidHide", "Excepción al activar HidHide.", ex);
                 RestoreCore();
                 return false;
             }
@@ -184,12 +192,21 @@ public sealed class HidHideIntegrationService : IDisposable
         {
             foreach (string id in _hiddenByUs)
             {
-                try { RunCli($"--dev-unhide \"{id}\""); } catch { }
+                try
+                {
+                    var r = RunCli($"--dev-unhide \"{id}\"");
+                    if (r.ExitCode != 0) VortexLog.Error("HidHide", $"No se pudo volver a mostrar {id}: {r.Output.Trim()}");
+                }
+                catch (Exception ex)
+                {
+                    VortexLog.Error("HidHide", $"Excepción al volver a mostrar {id}.", ex);
+                }
             }
 
             if (_cloakEnabledByUs)
             {
-                try { RunCli("--cloak-off"); } catch { }
+                try { RunCli("--cloak-off"); }
+                catch (Exception ex) { VortexLog.Error("HidHide", "Excepción al desactivar el ocultamiento.", ex); }
             }
         }
 
@@ -262,9 +279,10 @@ public sealed class HidHideIntegrationService : IDisposable
                 CloakEnabledByUs = _cloakEnabledByUs
             }));
         }
-        catch
+        catch (Exception ex)
         {
             // Without the file, crash recovery is lost, but hiding still works
+            VortexLog.Warn("HidHide", "No se pudo guardar el estado de sesión (sin recuperación tras cierre inesperado).", ex);
         }
     }
 

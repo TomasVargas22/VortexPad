@@ -291,9 +291,10 @@ public sealed class ProfileRepository
                         profilesById[loaded.Id] = loaded;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Ignore malformed user files
+                    // A corrupt file must not stop the others from loading, but leave a trace
+                    VortexPad.Core.Diagnostics.VortexLog.Warn("Perfiles", $"Se ignoró el perfil dañado '{Path.GetFileName(file)}'.", ex);
                 }
             }
         }

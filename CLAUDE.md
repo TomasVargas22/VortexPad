@@ -14,9 +14,9 @@ La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
 
 | Proyecto | TFM | Responsabilidad |
 |---|---|---|
-| `VortexPad.Core` | net8.0 | Modelos (`Models/ControllerState.cs`), bucle de 1000 Hz (`Engine/HighPrecisionPollingLoop`), `Processing/SignalProcessor` + `GyroProcessor`, `Automation/MacroAndTurboEngine.ProcessFrame`, perfiles/presets + `ProfileRepository` (en `Profiles/BuiltInPresets.cs`), parsers HID puros en `Hid/` |
+| `VortexPad.Core` | net8.0 | Modelos (`Models/ControllerState.cs`), bucle de 1000 Hz (`Engine/HighPrecisionPollingLoop`), `Processing/SignalProcessor` + `GyroProcessor`, `Automation/MacroAndTurboEngine.ProcessFrame`, perfiles/presets + `ProfileRepository` (en `Profiles/BuiltInPresets.cs`), parsers HID puros en `Hid/`, log `Diagnostics/VortexLog` (rotativo, `ErrorThrottled` para rutas calientes), ajustes `Settings/AppSettings`, `Devices/DeviceSelectionPolicy` |
 | `VortexPad.AI` | net8.0 | `SmartMapperAndCalibrator`: identificación VID:PID, calibración de drift 3σ, tuning por género |
-| `VortexPad.Input` | net8.0-windows | `DirectInputAndHidProvider` (Vortice.DirectInput + HidSharp), `SonyHidReaderBase` (hilo propio con snapshot y reconexión) con `DualSenseHidReader` y `DualShock4HidReader`, `ForegroundGameWatcher` |
+| `VortexPad.Input` | net8.0-windows | `DirectInputAndHidProvider` (Vortice.DirectInput + HidSharp), `SonyHidReaderBase` (hilo propio con snapshot y reconexión) con `DualSenseHidReader` y `DualShock4HidReader`, `HidDeviceWatcher` (hot-plug), `ForegroundGameWatcher` |
 | `VortexPad.Emulation` | net8.0-windows | `ViGEmVirtualControllerService`, `NativeKeyboardMouseInjector`, `HidHideIntegrationService` |
 | `VortexPad.ViewModels` | net8.0 | MVVM (CommunityToolkit.Mvvm): `ProfileEditorViewModel` y sus secciones (sticks, gatillos, gyro, vibración, capas, turbos, macros). Editan el perfil en sitio, validan rangos y avisan con `ProfileEdited` |
 | `VortexPad.App` | net8.0-windows | WPF `MainWindow` (code-behind para motor, dispositivos y visualizador) + `Views/ProfileEditorView` (MVVM) + icono de bandeja |
@@ -43,3 +43,9 @@ Flujo por tick: `OnHighPrecisionTick` → `PollCurrentState` (snapshot, no bloqu
 - Instance IDs de HidHide con DualSense por Bluetooth; mandos Xbox por XInput pueden seguir visibles aunque se oculte su interfaz HID.
 - DualShock 4 por HID: layout de calibración del adaptador inalámbrico 0x0BA0 (se detecta por signos plus/minus), signos del giroscopio y que BT pase al reporte 0x11 tras leer el feature 0x05.
 - Vibración/LED (`Core/Hid/SonyOutputReports.cs`): DualSense usa a la vez `COMPATIBLE_VIBRATION` (flag0) y `COMPATIBLE_VIBRATION2` (flag2) para cubrir firmware viejo y nuevo; DS4 BT usa `0xC4` (HID + CRC + 4 ms). Comprobar que vibra y cambia de color por USB y BT, y que la longitud de escritura (`GetMaxOutputReportLength`) es aceptada por Windows.
+- Hot-plug: desconectar y reconectar el mando con la emulación activa (USB y BT, DirectInput y HID nativo). Al iniciar ViGEm se dispara un refresco de dispositivos; el DS4 virtual de ViGEm (054C:05C4) aparece como mando físico y no debe seleccionarse.
+
+## Logs y ajustes
+
+- Log: `%LOCALAPPDATA%\VortexPad\Logs\vortexpad.log` (rota a 1 MB, 5 archivos). Usa `VortexLog`; nunca `catch {}` silencioso salvo en limpieza (Dispose).
+- Ajustes de la app: `%LOCALAPPDATA%\VortexPad\settings.json` (`AppSettingsViewModel`).

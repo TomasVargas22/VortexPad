@@ -1,4 +1,5 @@
 using HidSharp;
+using VortexPad.Core.Diagnostics;
 using VortexPad.Core.Hid;
 using VortexPad.Core.Models;
 
@@ -210,9 +211,10 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
                     SendPendingOutput();
                 }
             }
-            catch (Exception) when (_running)
+            catch (Exception ex) when (_running)
             {
                 // IOException / ObjectDisposedException: controller unplugged or BT link lost → reconnect
+                VortexLog.Warn(DeviceLabel, $"Se perdió la conexión HID ({ex.GetType().Name}); reintentando cada segundo.");
             }
             finally
             {
@@ -235,8 +237,15 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
         {
             var found = DeviceList.Local.GetHidDevices()
                 .FirstOrDefault(d => string.Equals(d.DevicePath, _devicePath, StringComparison.OrdinalIgnoreCase));
-            if (found == null || !found.TryOpen(out var opened))
+            if (found == null)
             {
+                return false; // unplugged: normal, the loop retries every second
+            }
+            if (!found.TryOpen(out var opened))
+            {
+                // Connected but cannot be opened (another app has it exclusively, permissions…)
+                VortexLog.ErrorThrottled($"{DeviceLabel}.open", TimeSpan.FromSeconds(30), DeviceLabel,
+                    "El mando está conectado pero no se pudo abrir (¿otra app lo usa en exclusiva?).");
                 return false;
             }
 
@@ -267,10 +276,12 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
             }
             device = found;
             stream = opened;
+            VortexLog.Info(DeviceLabel, $"Conectado por HID nativo (IMU {(calibration.IsFromDevice ? "calibrada" : "nominal")}).");
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            VortexLog.ErrorThrottled($"{DeviceLabel}.open", TimeSpan.FromSeconds(30), DeviceLabel, "Error al abrir el mando HID.", ex);
             CloseStream();
             return false;
         }
@@ -335,9 +346,11 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
                 stream.Write(_outputBuffer, 0, writeLength);
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
                 // Timeout or disconnection: the read loop handles reconnecting
+                VortexLog.ErrorThrottled($"{DeviceLabel}.write", TimeSpan.FromSeconds(10), DeviceLabel,
+                    "No se pudo enviar vibración/LED al mando.", ex);
                 return false;
             }
         }

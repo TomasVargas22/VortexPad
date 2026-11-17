@@ -4,10 +4,13 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using VortexPad.AI;
 using VortexPad.Core.Automation;
+using VortexPad.Core.Devices;
+using VortexPad.Core.Diagnostics;
 using VortexPad.Core.Engine;
 using VortexPad.Core.Models;
 using VortexPad.Core.Processing;
 using VortexPad.Core.Profiles;
+using VortexPad.Core.Settings;
 using VortexPad.Emulation;
 using VortexPad.Input;
 using VortexPad.ViewModels;
@@ -57,17 +60,29 @@ public partial class MainWindow : Window
     // Profile editor (MVVM): edits _activeProfile in place and notifies every change
     private readonly ProfileEditorViewModel _profileEditor = new();
 
+    // App settings (settings.json) and controller hot-plug
+    private readonly AppSettingsViewModel _appSettings = new(new AppSettingsStore());
+    private readonly HidDeviceWatcher _deviceWatcher = new();
+    private bool _refreshingDevices;
+    private bool _selectedDeviceMissing;
+
     public MainWindow()
     {
         _suppressUiEvents = true;
         _profiles = _profileRepository.LoadAllWithBuiltIns().ToList();
-        _activeProfile = _profiles.First();
+        _activeProfile = _profiles.FirstOrDefault(p => p.Id == _appSettings.Settings.LastProfileId) ?? _profiles.First();
         _runtimeProfile = ProfileRepository.DeepCopy(_activeProfile);
 
         InitializeComponent();
 
         ProfileEditor.DataContext = _profileEditor;
         _profileEditor.ProfileEdited += OnProfileEdited;
+
+        SettingsPanel.DataContext = _appSettings;
+        _appSettings.SettingChanged += OnAppSettingChanged;
+        _gameWatcher.AutoSwitchEnabled = _appSettings.Settings.AutoSwitchEnabled;
+        _deviceWatcher.DevicesChanged += () => Dispatcher.BeginInvoke(async () => await RefreshDevicesListAsync());
+        StateChanged += OnWindowStateChanged;
 
         _pollingLoop = new HighPrecisionPollingLoop(OnHighPrecisionTick);
         _pollingLoop.TelemetryUpdated += OnPollingTelemetryUpdated;
@@ -94,7 +109,74 @@ public partial class MainWindow : Window
         // If the previous session closed unexpectedly with the controller hidden, make it visible again
         await Task.Run(_hidHideService.RecoverPreviousSession);
         await RefreshDevicesListAsync();
-        await StartEmulationEngineAsync();
+        _deviceWatcher.Start();
+
+        // Keeps the Run entry pointing at the current exe (in case the app was moved)
+        if (_appSettings.StartWithWindows) StartupRegistration.Apply(true);
+
+        if (_appSettings.StartEmulationOnLaunch)
+        {
+            await StartEmulationEngineAsync();
+        }
+        else
+        {
+            TxtFooterStatus.Text = "Emulación detenida (inicio automático desactivado en Ajustes).";
+        }
+
+        if (App.StartMinimized && _trayIcon != null)
+        {
+            WindowState = WindowState.Minimized; // OnWindowStateChanged hides it in the tray
+        }
+    }
+
+    // ---------------- App settings ----------------
+
+    private void OnAppSettingChanged(string name)
+    {
+        switch (name)
+        {
+            case nameof(AppSettingsViewModel.AutoSwitchEnabled):
+                _gameWatcher.AutoSwitchEnabled = _appSettings.AutoSwitchEnabled;
+                break;
+            case nameof(AppSettingsViewModel.StartWithWindows):
+                if (!StartupRegistration.Apply(_appSettings.StartWithWindows))
+                {
+                    TxtFooterStatus.Text = "No se pudo cambiar el inicio con Windows (ver log).";
+                }
+                break;
+        }
+    }
+
+    private void OnWindowStateChanged(object? sender, EventArgs e)
+    {
+        if (WindowState == WindowState.Minimized && _appSettings.MinimizeToTray && _trayIcon != null)
+        {
+            Hide(); // emulation keeps running; restore from the tray icon
+        }
+    }
+
+    private void ShowFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void BtnOpenLogs_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(RotatingFileLogSink.DefaultDirectory);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = RotatingFileLogSink.DefaultDirectory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            VortexLog.Warn("UI", "No se pudo abrir la carpeta de logs.", ex);
+        }
     }
 
     /// <summary>
@@ -129,12 +211,7 @@ public partial class MainWindow : Window
             };
 
             var menu = new WinForms.ContextMenuStrip();
-            menu.Items.Add("Mostrar VortexPad", null, (_, _) => Dispatcher.Invoke(() =>
-            {
-                Show();
-                WindowState = WindowState.Normal;
-                Activate();
-            }));
+            menu.Items.Add("Mostrar VortexPad", null, (_, _) => Dispatcher.Invoke(ShowFromTray));
             menu.Items.Add("-");
             menu.Items.Add("Perfil: Xbox (Standard / Series)", null, (_, _) => Dispatcher.Invoke(() => SelectPresetById(BuiltInPresets.XboxStandardId)));
             menu.Items.Add("Perfil: PS5 / PlayStation (DualSense)", null, (_, _) => Dispatcher.Invoke(() => SelectPresetById(BuiltInPresets.Ps5DualSenseId)));
@@ -143,27 +220,93 @@ public partial class MainWindow : Window
             menu.Items.Add("Salir", null, (_, _) => Dispatcher.Invoke(Close));
 
             _trayIcon.ContextMenuStrip = menu;
-            _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(() =>
-            {
-                Show();
-                WindowState = WindowState.Normal;
-                Activate();
-            });
+            _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowFromTray);
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore tray icon initialization issues in restricted sessions
+            // Restricted sessions without a tray: the app works anyway (minimize-to-tray is disabled)
+            _trayIcon = null;
+            VortexLog.Warn("UI", "No se pudo crear el icono de la bandeja del sistema.", ex);
         }
     }
 
     private async Task RefreshDevicesListAsync()
     {
         var devices = await Task.Run(() => _inputProvider.DiscoverDevices());
-        CmbPhysicalDevices.ItemsSource = devices;
-        CmbPhysicalDevices.DisplayMemberPath = nameof(DetectedPhysicalDevice.DisplayName);
-        if (devices.Count > 0)
+
+        // Keeps the current controller (or the one saved in settings); if it was unplugged, it stays marked
+        // "(desconectado)" and is picked up again by itself when it comes back.
+        var current = _selectedDevice;
+        var result = DeviceSelectionPolicy.Merge(
+            devices,
+            current,
+            _appSettings.Settings.LastDeviceId,
+            d => d.UniqueId,
+            d => d.AsDisconnected());
+
+        _refreshingDevices = true;
+        try
         {
-            CmbPhysicalDevices.SelectedIndex = 0;
+            CmbPhysicalDevices.DisplayMemberPath = nameof(DetectedPhysicalDevice.DisplayName);
+            CmbPhysicalDevices.ItemsSource = result.Items;
+            CmbPhysicalDevices.SelectedItem = result.Selected;
+        }
+        finally
+        {
+            _refreshingDevices = false;
+        }
+
+        await ApplySelectedDeviceAsync(result.Selected);
+    }
+
+    /// <summary>
+    /// Activates the chosen controller. If it is the same native HID one that was already open, the reader is
+    /// not recreated (it reconnects by itself). DirectInput is reopened, because its handle is no longer valid
+    /// after an unplug.
+    /// </summary>
+    private async Task ApplySelectedDeviceAsync(DetectedPhysicalDevice? device)
+    {
+        var previous = _selectedDevice;
+        bool sameDevice = previous != null && device != null && previous.UniqueId == device.UniqueId;
+        bool wasMissing = _selectedDeviceMissing;
+        _selectedDevice = device;
+
+        if (device is { IsDisconnectedPlaceholder: true })
+        {
+            if (!wasMissing)
+            {
+                VortexLog.Warn("HotPlug", $"Se desconectó '{previous?.DisplayName}'; esperando a que vuelva.");
+                TxtFooterStatus.Text = $"Mando desconectado: {device.DisplayName}. Se retomará solo al reconectarlo.";
+            }
+            _selectedDeviceMissing = true;
+            return;
+        }
+
+        _selectedDeviceMissing = false;
+
+        if (!sameDevice || device is not { IsNativeHid: true })
+        {
+            _inputProvider.SelectDevice(device);
+        }
+        PushPhysicalOutput(); // LED/vibration of the active profile on the controller
+
+        if (device != null)
+        {
+            _appSettings.RememberDevice(device.UniqueId);
+            var sig = _aiAssistant.IdentifyController(device.VendorId, device.ProductId, device.DisplayName);
+            TxtAiDeviceSignature.Text = sig.Summary;
+        }
+
+        if (wasMissing && sameDevice)
+        {
+            VortexLog.Info("HotPlug", $"'{device!.DisplayName}' se reconectó.");
+            TxtFooterStatus.Text = $"Mando reconectado: {device.DisplayName}.";
+        }
+
+        // Hide the new controller (or the reconnected one: its instance ID may change between USB and BT)
+        if (_pollingLoop.IsRunning && (!sameDevice || wasMissing))
+        {
+            await ApplyHidHideAsync();
         }
     }
 
@@ -454,21 +597,8 @@ public partial class MainWindow : Window
 
     private async void CmbPhysicalDevices_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        _selectedDevice = CmbPhysicalDevices.SelectedItem as DetectedPhysicalDevice;
-        _inputProvider.SelectDevice(_selectedDevice);
-        PushPhysicalOutput(); // LED/vibration of the active profile on the new controller
-
-        if (_selectedDevice != null)
-        {
-            var sig = _aiAssistant.IdentifyController(_selectedDevice.VendorId, _selectedDevice.ProductId, _selectedDevice.DisplayName);
-            TxtAiDeviceSignature.Text = sig.Summary;
-        }
-
-        // Unhide the previous controller and hide the new one
-        if (_pollingLoop.IsRunning)
-        {
-            await ApplyHidHideAsync();
-        }
+        if (_refreshingDevices) return; // RefreshDevicesListAsync applies the selection itself
+        await ApplySelectedDeviceAsync(CmbPhysicalDevices.SelectedItem as DetectedPhysicalDevice);
     }
 
     private void LstProfiles_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -476,6 +606,7 @@ public partial class MainWindow : Window
         if (LstProfiles.SelectedItem is ControllerProfile selected)
         {
             LoadProfileIntoUi(selected);
+            _appSettings.RememberProfile(selected.Id);
             if (_pollingLoop.IsRunning)
             {
                 _vigemService.StartVirtualController(_activeProfile.TargetControllerType);
@@ -780,6 +911,7 @@ public partial class MainWindow : Window
         _driftRecorder.Cancel();
         _calibrationSamplerCts?.Cancel();
         _gameWatcher.Dispose();
+        _deviceWatcher.Dispose();
         _pollingLoop.Dispose();
         _vigemService.Dispose();
         _kmInjector.Dispose();

@@ -162,6 +162,18 @@
                                 <TextBlock x:Name="TxtAiCalibrationResult" Text="Listo para analizar ruido del sensor y sugerir curvas óptimas." FontSize="11" Foreground="#E0AAFF" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
+
+                        <Separator Background="{StaticResource BorderSubtle}" Margin="0,12,0,12"/>
+
+                        <!-- APP SETTINGS (settings.json, AppSettingsViewModel) -->
+                        <StackPanel x:Name="SettingsPanel">
+                            <TextBlock Text="3. AJUSTES DE LA APP" FontSize="12" FontWeight="Bold" Foreground="#00E5FF" Margin="0,0,0,6"/>
+                            <CheckBox Content="Cambiar de perfil según el juego activo" IsChecked="{Binding AutoSwitchEnabled}" Foreground="#E2E8F0" Margin="0,0,0,5"/>
+                            <CheckBox Content="Iniciar emulación al abrir VortexPad" IsChecked="{Binding StartEmulationOnLaunch}" Foreground="#E2E8F0" Margin="0,0,0,5"/>
+                            <CheckBox Content="Minimizar a la bandeja del sistema" IsChecked="{Binding MinimizeToTray}" Foreground="#E2E8F0" Margin="0,0,0,5"/>
+                            <CheckBox Content="Iniciar con Windows (minimizado)" IsChecked="{Binding StartWithWindows}" Foreground="#E2E8F0" Margin="0,0,0,8"/>
+                            <Button Style="{StaticResource FluentButton}" Click="BtnOpenLogs_Click" HorizontalAlignment="Left" Padding="8,4" FontSize="11" Content="📄 Abrir carpeta de logs"/>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </Border>

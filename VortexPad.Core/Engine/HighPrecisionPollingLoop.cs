@@ -163,9 +163,11 @@ public sealed class HighPrecisionPollingLoop : IDisposable
                 {
                     _onTick(deltaSec);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Keep realtime loop alive even if a callback throws
+                    // Keep realtime loop alive even if a callback throws, but leave a trace (at most every 5 s)
+                    VortexPad.Core.Diagnostics.VortexLog.ErrorThrottled(
+                        "loop.tick", TimeSpan.FromSeconds(5), "Bucle1000Hz", "Excepción en el tick del bucle de polling.", ex);
                 }
 
                 long tickEnd = stopwatch.ElapsedTicks;

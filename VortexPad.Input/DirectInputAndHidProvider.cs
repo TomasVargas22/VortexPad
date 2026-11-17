@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using HidSharp;
 using Vortice.DirectInput;
+using VortexPad.Core.Diagnostics;
 using VortexPad.Core.Hid;
 using VortexPad.Core.Models;
 
@@ -30,6 +31,18 @@ public sealed record DetectedPhysicalDevice(
     public bool IsNativeHid => NativeHid != NativeHidKind.None;
     public bool IsNativeDualSense => NativeHid == NativeHidKind.DualSense;
     public bool IsNativeDualShock4 => NativeHid == NativeHidKind.DualShock4;
+
+    /// <summary>
+    /// Entry kept in the list while the selected controller is unplugged, so it is picked up again
+    /// automatically when it is reconnected.
+    /// </summary>
+    public bool IsDisconnectedPlaceholder { get; init; }
+
+    public DetectedPhysicalDevice AsDisconnected() => this with
+    {
+        DisplayName = IsDisconnectedPlaceholder ? DisplayName : $"{DisplayName} (desconectado)",
+        IsDisconnectedPlaceholder = true
+    };
 }
 
 public sealed class DirectInputAndHidProvider : IDisposable
@@ -76,9 +89,10 @@ public sealed class DirectInputAndHidProvider : IDisposable
         {
             _directInput = DInput.DirectInput8Create();
         }
-        catch
+        catch (Exception ex)
         {
             _directInput = null;
+            VortexLog.Error("DirectInput", "No se pudo inicializar DirectInput8; solo se usarán mandos HID nativos.", ex);
         }
     }
 
@@ -109,9 +123,10 @@ public sealed class DirectInputAndHidProvider : IDisposable
                         DirectInputGuid: dev.InstanceGuid));
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore enumeration error on headless/restricted systems
+                // Headless/restricted systems: continue with HID only
+                VortexLog.Warn("DirectInput", "Falló la enumeración de dispositivos DirectInput.", ex);
             }
         }
 
@@ -177,9 +192,9 @@ public sealed class DirectInputAndHidProvider : IDisposable
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore HID enumeration issues
+            VortexLog.Warn("HID", "Falló la enumeración de dispositivos HID.", ex);
         }
 
         // Always provide a Virtual Test / Calibration Device entry so the user can test curves/macros without hardware plugged in
@@ -262,9 +277,9 @@ public sealed class DirectInputAndHidProvider : IDisposable
                 if (id != null) ids.Add(id);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // HID enumeration unavailable
+            VortexLog.Warn("HID", "No se pudieron resolver las rutas HID para HidHide.", ex);
         }
 
         return ids.ToList();
@@ -310,8 +325,9 @@ public sealed class DirectInputAndHidProvider : IDisposable
                 _activeDeviceGuid = device.DirectInputGuid;
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                VortexLog.Error("DirectInput", $"No se pudo abrir '{device.DisplayName}'.", ex);
                 ReleaseActiveDInputDevice();
                 return false;
             }
@@ -400,10 +416,12 @@ public sealed class DirectInputAndHidProvider : IDisposable
                     if (pov is >= 22500 and <= 31500) state.PressedButtons.Add(ControllerButton.DPadLeft);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Try re-acquiring on next poll
-                try { _activeDInputDevice?.Acquire(); } catch { }
+                // Controller unplugged or focus lost: retry on the next poll (the hot-plug refresh recreates it)
+                VortexLog.ErrorThrottled("dinput.poll", TimeSpan.FromSeconds(10), "DirectInput",
+                    "Falló la lectura del mando DirectInput; reintentando.", ex);
+                try { _activeDInputDevice?.Acquire(); } catch { /* still unavailable */ }
             }
         }
 

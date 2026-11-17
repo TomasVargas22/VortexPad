@@ -3,6 +3,7 @@ using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.DualShock4;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
+using VortexPad.Core.Diagnostics;
 using VortexPad.Core.Models;
 
 namespace VortexPad.Emulation;
@@ -43,6 +44,7 @@ public sealed class ViGEmVirtualControllerService : IDisposable
             {
                 IsDriverAvailable = false;
                 StatusMessage = $"ViGEmBus no disponible ({ex.GetType().Name})";
+                VortexLog.Error("ViGEm", "No se pudo conectar con el driver ViGEmBus (¿está instalado?).", ex);
                 return false;
             }
         }
@@ -80,6 +82,7 @@ public sealed class ViGEmVirtualControllerService : IDisposable
                     _activeType = VirtualControllerType.DualShock4;
                     IsControllerConnected = true;
                     StatusMessage = "DualShock 4 Virtual Conectado (ViGEmBus)";
+                    VortexLog.Info("ViGEm", StatusMessage);
                 }
                 else
                 {
@@ -90,12 +93,14 @@ public sealed class ViGEmVirtualControllerService : IDisposable
                     _activeType = VirtualControllerType.Xbox360;
                     IsControllerConnected = true;
                     StatusMessage = "Xbox 360 Virtual Conectado (ViGEmBus)";
+                    VortexLog.Info("ViGEm", StatusMessage);
                 }
                 return true;
             }
             catch (Exception ex)
             {
                 StatusMessage = $"Error al conectar mando virtual: {ex.Message}";
+                VortexLog.Error("ViGEm", $"Error al conectar el mando virtual {targetType}.", ex);
                 StopVirtualController();
                 return false;
             }
@@ -113,7 +118,7 @@ public sealed class ViGEmVirtualControllerService : IDisposable
                     _xbox360.FeedbackReceived -= OnXbox360FeedbackReceived;
                     _xbox360.Disconnect();
                 }
-                catch { }
+                catch (Exception ex) { VortexLog.Warn("ViGEm", "Error al desconectar el Xbox 360 virtual.", ex); }
                 _xbox360 = null;
             }
 
@@ -124,7 +129,7 @@ public sealed class ViGEmVirtualControllerService : IDisposable
                     _ds4.FeedbackReceived -= OnDs4FeedbackReceived;
                     _ds4.Disconnect();
                 }
-                catch { }
+                catch (Exception ex) { VortexLog.Warn("ViGEm", "Error al desconectar el DS4 virtual.", ex); }
                 _ds4 = null;
             }
 
