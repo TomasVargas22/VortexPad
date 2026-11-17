@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <ApplicationTitle>VortexPad</ApplicationTitle>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VortexPad.Core\VortexPad.Core.csproj" />
+    <ProjectReference Include="..\VortexPad.Input\VortexPad.Input.csproj" />
+    <ProjectReference Include="..\VortexPad.Emulation\VortexPad.Emulation.csproj" />
+    <ProjectReference Include="..\VortexPad.AI\VortexPad.AI.csproj" />
+  </ItemGroup>
+
+</Project>

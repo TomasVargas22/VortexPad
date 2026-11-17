@@ -1,0 +1,105 @@
+# =====================================================================
+#  VortexPad — .gitignore (.NET 8 / WPF / xUnit / Visual Studio / Rider / VS Code)
+# =====================================================================
+
+# ---------- Salidas de compilación ----------
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]64/
+[Bb]uild/
+[Bb]uilds/
+[Oo]ut/
+artifacts/
+publish/
+*.pdb
+*.ilk
+*.obj
+*.tlog
+*.cache
+*.binlog
+
+# ---------- Instaladores / paquetes generados ----------
+*.nupkg
+*.snupkg
+*.msi
+*.msix
+*.appx
+*.appxbundle
+*.zip
+*.7z
+# Las dependencias NuGet se restauran con `dotnet restore`
+[Pp]ackages/
+!**/[Pp]ackages/build/
+
+# ---------- Pruebas y cobertura ----------
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+[Cc]overage[Rr]eport/
+
+# ---------- Logs y temporales ----------
+[Ll]og/
+[Ll]ogs/
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# ---------- Visual Studio ----------
+.vs/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.rsuser
+*.ncb
+*.aps
+*.VC.db
+*.VC.opendb
+ipch/
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# ---------- JetBrains Rider ----------
+.idea/
+*.sln.iml
+
+# ---------- VS Code (se conservan ajustes compartibles) ----------
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ---------- Claude Code (ajustes locales de cada usuario) ----------
+.claude/settings.local.json
+
+# ---------- Secretos / configuración local ----------
+.env
+.env.*
+*.pfx
+*.snk
+appsettings.*.local.json
+secrets.json
+
+# ---------- Perfiles de usuario exportados a mano para pruebas ----------
+# (los perfiles reales viven en %LOCALAPPDATA%\VortexPad\Profiles, fuera del repo)
+/profiles-local/
+
+# ---------- Sistema operativo ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

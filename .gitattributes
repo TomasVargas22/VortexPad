@@ -1,0 +1,21 @@
+# Normaliza finales de línea: LF en el repositorio, nativos al hacer checkout
+* text=auto
+
+# Archivos de Visual Studio que deben quedarse en CRLF
+*.sln      text eol=crlf
+*.csproj   text eol=crlf
+*.props    text eol=crlf
+*.targets  text eol=crlf
+
+# Código y recursos de texto
+*.cs       text diff=csharp
+*.xaml     text
+*.json     text
+*.md       text
+
+# Binarios (nunca convertir ni hacer diff de texto)
+*.png      binary
+*.jpg      binary
+*.ico      binary
+*.dll      binary
+*.exe      binary
