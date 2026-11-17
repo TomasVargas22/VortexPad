@@ -18,8 +18,9 @@ La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
 | `VortexPad.AI` | net8.0 | `SmartMapperAndCalibrator`: identificación VID:PID, calibración de drift 3σ, tuning por género |
 | `VortexPad.Input` | net8.0-windows | `DirectInputAndHidProvider` (Vortice.DirectInput + HidSharp), `SonyHidReaderBase` (hilo propio con snapshot y reconexión) con `DualSenseHidReader` y `DualShock4HidReader`, `ForegroundGameWatcher` |
 | `VortexPad.Emulation` | net8.0-windows | `ViGEmVirtualControllerService`, `NativeKeyboardMouseInjector`, `HidHideIntegrationService` |
-| `VortexPad.App` | net8.0-windows | WPF `MainWindow` (code-behind, sin MVVM todavía) + icono de bandeja |
-| `VortexPad.CoreTests` | net8.0 | xUnit; referencia solo Core y AI |
+| `VortexPad.ViewModels` | net8.0 | MVVM (CommunityToolkit.Mvvm): `ProfileEditorViewModel` y sus secciones (sticks, gatillos, gyro, vibración, capas, turbos, macros). Editan el perfil en sitio, validan rangos y avisan con `ProfileEdited` |
+| `VortexPad.App` | net8.0-windows | WPF `MainWindow` (code-behind para motor, dispositivos y visualizador) + `Views/ProfileEditorView` (MVVM) + icono de bandeja |
+| `VortexPad.CoreTests` | net8.0 | xUnit; referencia Core, AI y ViewModels |
 
 Flujo por tick: `OnHighPrecisionTick` → `PollCurrentState` (snapshot, no bloquea) → `ProcessFrame` → `ViGEm.SubmitState` + `KmInjector.ApplyOutput`.
 

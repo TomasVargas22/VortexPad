@@ -16,6 +16,7 @@
     <ProjectReference Include="..\VortexPad.Input\VortexPad.Input.csproj" />
     <ProjectReference Include="..\VortexPad.Emulation\VortexPad.Emulation.csproj" />
     <ProjectReference Include="..\VortexPad.AI\VortexPad.AI.csproj" />
+    <ProjectReference Include="..\VortexPad.ViewModels\VortexPad.ViewModels.csproj" />
   </ItemGroup>
 
 </Project>

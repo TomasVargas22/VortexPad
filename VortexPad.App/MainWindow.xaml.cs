@@ -10,6 +10,8 @@ using VortexPad.Core.Processing;
 using VortexPad.Core.Profiles;
 using VortexPad.Emulation;
 using VortexPad.Input;
+using VortexPad.ViewModels;
+using MessageBox = System.Windows.MessageBox;
 using Color = System.Windows.Media.Color;
 using ColorConverter = System.Windows.Media.ColorConverter;
 using Point = System.Windows.Point;
@@ -52,6 +54,9 @@ public partial class MainWindow : Window
     private bool _suppressUiEvents;
     private WinForms.NotifyIcon? _trayIcon;
 
+    // Profile editor (MVVM): edits _activeProfile in place and notifies every change
+    private readonly ProfileEditorViewModel _profileEditor = new();
+
     public MainWindow()
     {
         _suppressUiEvents = true;
@@ -61,6 +66,9 @@ public partial class MainWindow : Window
 
         InitializeComponent();
 
+        ProfileEditor.DataContext = _profileEditor;
+        _profileEditor.ProfileEdited += OnProfileEdited;
+
         _pollingLoop = new HighPrecisionPollingLoop(OnHighPrecisionTick);
         _pollingLoop.TelemetryUpdated += OnPollingTelemetryUpdated;
         _vigemService.FeedbackReceived += OnControllerFeedbackReceived;
@@ -69,7 +77,6 @@ public partial class MainWindow : Window
         InitializeSystemTray();
         RefreshProfilesList();
         LoadProfileIntoUi(_activeProfile);
-        RedrawResponseCurveCanvas();
 
         _uiRefreshTimer = new DispatcherTimer
         {
@@ -174,65 +181,9 @@ public partial class MainWindow : Window
         try
         {
             _activeProfile = profile;
-            TxtActiveProfileTitle.Text = $"Perfil Activo: {profile.Name}";
-            TxtActiveProfileDesc.Text = profile.Description;
-            TxtLinkedProcesses.Text = string.Join(", ", profile.LinkedProcessNames);
-            ChkHidePhysical.IsChecked = profile.HidePhysicalControllerWithHidHide;
-
-            CmbTargetController.SelectedIndex = profile.TargetControllerType switch
-            {
-                VirtualControllerType.Xbox360 => 0,
-                VirtualControllerType.DualShock4 => 1,
-                VirtualControllerType.KeyboardMouse => 2,
-                _ => 0
-            };
-
-            CmbCurveType.SelectedIndex = profile.RightStick.CurveType switch
-            {
-                ResponseCurveType.Linear => 0,
-                ResponseCurveType.Exponential => 1,
-                ResponseCurveType.SCurve => 2,
-                ResponseCurveType.CustomBezier => 3,
-                _ => 0
-            };
-
-            SldInnerDeadzone.Value = profile.RightStick.InnerDeadzone;
-            SldAntiDeadzone.Value = profile.RightStick.AntiDeadzone;
-            SldCurveExponent.Value = profile.RightStick.CurveExponent;
-            SldStickSensitivity.Value = profile.RightStick.Sensitivity;
-            ChkHairTriggers.IsChecked = profile.RightTrigger.HairTriggerMode;
-
-            CmbGyroMode.SelectedIndex = profile.Gyro.OutputMode switch
-            {
-                GyroOutputMode.Disabled => 0,
-                GyroOutputMode.RightStick => 1,
-                GyroOutputMode.MouseDelta => 2,
-                _ => 0
-            };
-            SldGyroSens.Value = profile.Gyro.SensitivityX;
-
-            var southTurbo = profile.TurboConfigs.FirstOrDefault(t => t.Button == ControllerButton.South);
-            ChkTurboSouth.IsChecked = southTurbo?.Enabled ?? false;
-            if (southTurbo != null)
-            {
-                SldTurboHz.Value = southTurbo.FrequencyHz;
-            }
-
-            ChkStickToWasd.IsChecked = profile.BaseLayer.LeftStickToWasd;
-
-            UpdateSliderValueLabels();
-            UpdateDeadzoneCircles();
-            RedrawResponseCurveCanvas();
-
-            try
-            {
-                var color = (Color)ColorConverter.ConvertFromString(profile.LightbarHex);
-                BdLightbarPreview.Background = new SolidColorBrush(color);
-            }
-            catch
-            {
-                BdLightbarPreview.Background = new SolidColorBrush(Color.FromRgb(0, 229, 255));
-            }
+            _profileEditor.Load(profile); // the editor edits this same instance
+            RefreshProfileHeader();
+            BtnDeleteProfile.Content = profile.IsBuiltInPreset ? "↺ Restablecer" : "🗑 Eliminar";
         }
         finally
         {
@@ -241,6 +192,68 @@ public partial class MainWindow : Window
 
         PublishRuntimeProfile();
         PublishFeedbackSettings();
+    }
+
+    /// <summary>Profile header in the center column (name, description, LED, deadzone circles).</summary>
+    private void RefreshProfileHeader()
+    {
+        TxtActiveProfileTitle.Text = $"Perfil Activo: {_activeProfile.Name}";
+        TxtActiveProfileDesc.Text = _activeProfile.Description;
+        UpdateDeadzoneCircles();
+
+        try
+        {
+            var color = (Color)ColorConverter.ConvertFromString(_activeProfile.LightbarHex);
+            BdLightbarPreview.Background = new SolidColorBrush(color);
+        }
+        catch
+        {
+            BdLightbarPreview.Background = new SolidColorBrush(Color.FromRgb(0, 229, 255));
+        }
+    }
+
+    /// <summary>
+    /// Any change in the editor: publishes the snapshot to the loop and applies what needs action
+    /// outside the profile (virtual controller type, HidHide, vibration/LED, profile list).
+    /// </summary>
+    private async void OnProfileEdited(string what)
+    {
+        if (_suppressUiEvents) return;
+
+        PublishRuntimeProfile();
+        RefreshProfileHeader();
+
+        switch (what)
+        {
+            case nameof(ProfileEditorViewModel.Name):
+                LstProfiles.Items.Refresh();
+                break;
+
+            case nameof(ProfileEditorViewModel.LightbarHex):
+            case "Enabled":
+            case "OverallStrength":
+            case "LargeMotorGain":
+            case "SmallMotorGain":
+                PublishFeedbackSettings();
+                break;
+
+            case nameof(ProfileEditorViewModel.TargetControllerType):
+                if (_pollingLoop.IsRunning)
+                {
+                    var type = _activeProfile.TargetControllerType;
+                    await Task.Run(() => _vigemService.StartVirtualController(type));
+                    TxtVigemStatus.Text = _vigemService.StatusMessage;
+                }
+                break;
+
+            case nameof(ProfileEditorViewModel.HidePhysicalControllerWithHidHide):
+                if (_pollingLoop.IsRunning) await ApplyHidHideAsync();
+                break;
+
+            case nameof(ProfileEditorViewModel.PollingRateHz):
+                _pollingLoop.TargetHz = _activeProfile.PollingRateHz;
+                break;
+        }
     }
 
     /// <summary>
@@ -349,11 +362,11 @@ public partial class MainWindow : Window
         PositionDot(DotRightOut, 85 + (outState.RX * 80), 85 - (outState.RY * 80), 12);
         TxtRightStickCoords.Text = $"Raw: ({raw.RX:F2}, {raw.RY:F2}) → Out: ({outState.RX:F2}, {outState.RY:F2})";
 
-        // Live point on Response Curve Canvas (300x150)
-        double rawMag = Math.Clamp(Math.Sqrt((raw.RX * raw.RX) + (raw.RY * raw.RY)), 0.0, 1.0);
-        double outMag = Math.Clamp(Math.Sqrt((outState.RX * outState.RX) + (outState.RY * outState.RY)), 0.0, 1.0);
-        Canvas.SetLeft(DotCurveLive, (rawMag * 300.0) - 5.0);
-        Canvas.SetTop(DotCurveLive, ((1.0 - outMag) * 150.0) - 5.0);
+        // Live point on the editor's curve, for the stick that is shown there
+        bool left = _profileEditor.CurveStickIndex == 0;
+        double rx = left ? raw.LX : raw.RX, ry = left ? raw.LY : raw.RY;
+        double ox = left ? outState.LX : outState.RX, oy = left ? outState.LY : outState.RY;
+        ProfileEditor.UpdateLiveDot(Math.Sqrt((rx * rx) + (ry * ry)), Math.Sqrt((ox * ox) + (oy * oy)));
 
         // Button pills highlight
         SetPillState(PillBtnSouth, outState.IsButtonActive(ControllerButton.South));
@@ -405,38 +418,6 @@ public partial class MainWindow : Window
         EllipseRightDeadzone.Height = rightRadiusPx;
         Canvas.SetLeft(EllipseRightDeadzone, 85.0 - (rightRadiusPx * 0.5));
         Canvas.SetTop(EllipseRightDeadzone, 85.0 - (rightRadiusPx * 0.5));
-    }
-
-    private void RedrawResponseCurveCanvas()
-    {
-        if (PolyResponseCurve == null) return;
-        var pts = new PointCollection();
-        var cfg = _activeProfile.RightStick;
-
-        const int steps = 60;
-        for (int i = 0; i <= steps; i++)
-        {
-            double xNorm = (double)i / steps;
-            var (outX, _) = SignalProcessor.ProcessStick2D(xNorm, 0.0, cfg);
-            double px = xNorm * 300.0;
-            double py = (1.0 - Math.Clamp(outX, 0.0, 1.0)) * 150.0;
-            pts.Add(new Point(px, py));
-        }
-
-        PolyResponseCurve.Points = pts;
-        TxtCurveFormula.Text =
-            $"Curva: {cfg.CurveType} (γ={cfg.CurveExponent:F2}) | Deadzone: {cfg.InnerDeadzone * 100:F1}% | Anti-DZ: {cfg.AntiDeadzone * 100:F1}%";
-    }
-
-    private void UpdateSliderValueLabels()
-    {
-        if (LblInnerDz == null) return;
-        LblInnerDz.Text = $"{SldInnerDeadzone.Value * 100:F1}%";
-        LblAntiDz.Text = $"{SldAntiDeadzone.Value * 100:F1}%";
-        LblExponent.Text = $"{SldCurveExponent.Value:F2}";
-        LblSensitivity.Text = $"{SldStickSensitivity.Value:F2}x";
-        LblGyroSens.Text = $"{SldGyroSens.Value:F1}x";
-        LblTurboHz.Text = $"{SldTurboHz.Value:F0} Hz";
     }
 
     private void SelectPresetById(string presetId)
@@ -519,113 +500,89 @@ public partial class MainWindow : Window
         TxtFooterStatus.Text = $"Perfil '{_activeProfile.Name}' guardado en disco.";
     }
 
-    private void CmbTargetController_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void BtnExportProfile_Click(object sender, RoutedEventArgs e)
     {
-        if (_suppressUiEvents) return;
-        _activeProfile.TargetControllerType = CmbTargetController.SelectedIndex switch
+        var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            0 => VirtualControllerType.Xbox360,
-            1 => VirtualControllerType.DualShock4,
-            2 => VirtualControllerType.KeyboardMouse,
-            _ => VirtualControllerType.Xbox360
+            Title = "Exportar perfil de VortexPad",
+            Filter = "Perfil VortexPad (*.json)|*.json",
+            FileName = SafeFileName(_activeProfile.Name) + ".json"
         };
-        PublishRuntimeProfile();
-        if (_pollingLoop.IsRunning)
+        if (dialog.ShowDialog(this) != true) return;
+
+        try
         {
-            _vigemService.StartVirtualController(_activeProfile.TargetControllerType);
-            TxtVigemStatus.Text = _vigemService.StatusMessage;
+            ProfileRepository.ExportProfile(_activeProfile, dialog.FileName);
+            TxtFooterStatus.Text = $"Perfil '{_activeProfile.Name}' exportado a {dialog.FileName}.";
+        }
+        catch (Exception ex)
+        {
+            TxtFooterStatus.Text = $"No se pudo exportar: {ex.Message}";
         }
     }
 
-    private void TxtLinkedProcesses_TextChanged(object sender, TextChangedEventArgs e)
+    private void BtnImportProfile_Click(object sender, RoutedEventArgs e)
     {
-        if (_suppressUiEvents) return;
-        _activeProfile.LinkedProcessNames = TxtLinkedProcesses.Text
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
-    }
-
-    private void CmbCurveType_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_suppressUiEvents) return;
-        var curve = CmbCurveType.SelectedIndex switch
+        var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            0 => ResponseCurveType.Linear,
-            1 => ResponseCurveType.Exponential,
-            2 => ResponseCurveType.SCurve,
-            3 => ResponseCurveType.CustomBezier,
-            _ => ResponseCurveType.Linear
+            Title = "Importar perfil de VortexPad",
+            Filter = "Perfil VortexPad (*.json)|*.json|Todos los archivos (*.*)|*.*"
         };
-        _activeProfile.LeftStick.CurveType = curve;
-        _activeProfile.RightStick.CurveType = curve;
-        PublishRuntimeProfile();
-        RedrawResponseCurveCanvas();
-    }
+        if (dialog.ShowDialog(this) != true) return;
 
-    private void StickSliders_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_suppressUiEvents) return;
-        _activeProfile.LeftStick.InnerDeadzone = SldInnerDeadzone.Value;
-        _activeProfile.RightStick.InnerDeadzone = SldInnerDeadzone.Value;
-        _activeProfile.LeftStick.AntiDeadzone = SldAntiDeadzone.Value;
-        _activeProfile.RightStick.AntiDeadzone = SldAntiDeadzone.Value;
-        _activeProfile.LeftStick.CurveExponent = SldCurveExponent.Value;
-        _activeProfile.RightStick.CurveExponent = SldCurveExponent.Value;
-        _activeProfile.LeftStick.Sensitivity = SldStickSensitivity.Value;
-        _activeProfile.RightStick.Sensitivity = SldStickSensitivity.Value;
-        _activeProfile.Gyro.SensitivityX = SldGyroSens.Value;
-        _activeProfile.Gyro.SensitivityY = SldGyroSens.Value * 0.85;
-        PublishRuntimeProfile();
-
-        UpdateSliderValueLabels();
-        UpdateDeadzoneCircles();
-        RedrawResponseCurveCanvas();
-    }
-
-    private void CmbGyroMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_suppressUiEvents) return;
-        _activeProfile.Gyro.OutputMode = CmbGyroMode.SelectedIndex switch
+        try
         {
-            1 => GyroOutputMode.RightStick,
-            2 => GyroOutputMode.MouseDelta,
-            _ => GyroOutputMode.Disabled
-        };
-        _activeProfile.Gyro.ActivationMode = GyroActivationMode.AlwaysOn;
-        PublishRuntimeProfile();
-    }
-
-    private async void ProfileSetting_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_suppressUiEvents || _activeProfile == null || ChkHidePhysical == null || ChkHairTriggers == null || ChkStickToWasd == null) return;
-
-        bool hideChanged = _activeProfile.HidePhysicalControllerWithHidHide != (ChkHidePhysical.IsChecked == true);
-        _activeProfile.HidePhysicalControllerWithHidHide = ChkHidePhysical.IsChecked == true;
-        _activeProfile.LeftTrigger.HairTriggerMode = ChkHairTriggers.IsChecked == true;
-        _activeProfile.RightTrigger.HairTriggerMode = ChkHairTriggers.IsChecked == true;
-        _activeProfile.BaseLayer.LeftStickToWasd = ChkStickToWasd.IsChecked == true;
-        PublishRuntimeProfile();
-
-        if (hideChanged && _pollingLoop.IsRunning)
+            var imported = ProfileRepository.ImportProfile(dialog.FileName, _profiles.Select(p => p.Id));
+            _profileRepository.SaveProfile(imported);
+            _profiles.Add(imported);
+            RefreshProfilesList();
+            LstProfiles.SelectedItem = imported;
+            TxtFooterStatus.Text = $"Perfil '{imported.Name}' importado y guardado.";
+        }
+        catch (Exception ex)
         {
-            await ApplyHidHideAsync();
+            TxtFooterStatus.Text = $"No se pudo importar: {ex.Message}";
         }
     }
 
-    private void TurboSetting_Changed(object sender, RoutedEventArgs e)
+    private void BtnDeleteProfile_Click(object sender, RoutedEventArgs e)
     {
-        if (_suppressUiEvents || _activeProfile == null || ChkTurboSouth == null || SldTurboHz == null) return;
-        UpdateSliderValueLabels();
+        var profile = _activeProfile;
+        bool builtIn = profile.IsBuiltInPreset;
 
-        var existing = _activeProfile.TurboConfigs.FirstOrDefault(t => t.Button == ControllerButton.South);
-        if (existing == null)
+        string question = builtIn
+            ? $"¿Restablecer '{profile.Name}' a sus valores de fábrica? Se pierden tus cambios guardados de este preset."
+            : $"¿Eliminar el perfil '{profile.Name}'? Se borra su archivo y no se puede deshacer.";
+        if (MessageBox.Show(this, question, "VortexPad", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
-            existing = new TurboButtonConfig { Button = ControllerButton.South };
-            _activeProfile.TurboConfigs.Add(existing);
+            return;
         }
-        existing.Enabled = ChkTurboSouth.IsChecked == true;
-        existing.FrequencyHz = SldTurboHz.Value;
-        PublishRuntimeProfile();
+
+        _profileRepository.DeleteProfile(profile.Id);
+
+        if (builtIn)
+        {
+            // Swap the in-memory instance for the original preset
+            var original = BuiltInPresets.CreateAll().First(p => p.Id == profile.Id);
+            int index = _profiles.IndexOf(profile);
+            _profiles[index] = original;
+            RefreshProfilesList();
+            LstProfiles.SelectedItem = original;
+            TxtFooterStatus.Text = $"Preset '{original.Name}' restablecido.";
+        }
+        else
+        {
+            _profiles.Remove(profile);
+            RefreshProfilesList();
+            LstProfiles.SelectedItem = _profiles.First();
+            TxtFooterStatus.Text = $"Perfil '{profile.Name}' eliminado.";
+        }
+    }
+
+    private static string SafeFileName(string name)
+    {
+        foreach (char c in System.IO.Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return string.IsNullOrWhiteSpace(name) ? "perfil" : name;
     }
 
     private void BtnAiCalibrateDrift_Click(object sender, RoutedEventArgs e)

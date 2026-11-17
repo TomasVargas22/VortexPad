@@ -309,6 +309,59 @@ public sealed class ProfileRepository
         File.WriteAllText(fullPath, SerializeProfile(profile));
     }
 
+    /// <summary>
+    /// Deletes the saved file of a profile. For a built-in preset this removes only the user's customizations
+    /// (on the next load the original preset comes back). Returns true if there was a file.
+    /// </summary>
+    public bool DeleteProfile(string profileId)
+    {
+        if (string.IsNullOrWhiteSpace(profileId)) return false;
+        string fullPath = Path.Combine(_storageDirectory, $"{SanitizeFileName(profileId)}.json");
+        if (!File.Exists(fullPath)) return false;
+        File.Delete(fullPath);
+        return true;
+    }
+
+    /// <summary>Exports a profile to a JSON file chosen by the user.</summary>
+    public static void ExportProfile(ControllerProfile profile, string filePath)
+    {
+        File.WriteAllText(filePath, SerializeProfile(profile));
+    }
+
+    /// <summary>
+    /// Imports a profile from a JSON file. It is always imported as a custom profile (never as a preset);
+    /// if its Id collides with <paramref name="existingIds"/> it gets a new one so nothing is overwritten.
+    /// Throws <see cref="InvalidDataException"/> if the file is not a valid profile.
+    /// </summary>
+    public static ControllerProfile ImportProfile(string filePath, IEnumerable<string> existingIds)
+    {
+        ControllerProfile? profile;
+        try
+        {
+            profile = DeserializeProfile(File.ReadAllText(filePath));
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException($"El archivo no es un perfil de VortexPad válido: {ex.Message}", ex);
+        }
+
+        if (profile == null)
+        {
+            throw new InvalidDataException("El archivo no contiene un perfil.");
+        }
+
+        var taken = new HashSet<string>(existingIds, StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(profile.Id) || taken.Contains(profile.Id))
+        {
+            profile.Id = $"custom-{Guid.NewGuid():N}"[..16];
+        }
+
+        profile.IsBuiltInPreset = false;
+        profile.Category = "Custom";
+        if (string.IsNullOrWhiteSpace(profile.Name)) profile.Name = "Perfil importado";
+        return profile;
+    }
+
     public ControllerProfile CloneProfile(ControllerProfile source, string? newName = null)
     {
         string json = SerializeProfile(source);

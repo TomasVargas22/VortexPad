@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\VortexPad.Core\VortexPad.Core.csproj" />
     <ProjectReference Include="..\VortexPad.AI\VortexPad.AI.csproj" />
+    <ProjectReference Include="..\VortexPad.ViewModels\VortexPad.ViewModels.csproj" />
   </ItemGroup>
 
 </Project>
