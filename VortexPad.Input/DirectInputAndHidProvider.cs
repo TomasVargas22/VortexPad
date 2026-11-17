@@ -96,9 +96,29 @@ public sealed class DirectInputAndHidProvider : IDisposable
         }
     }
 
+    /// <summary>ViGEm virtual controllers left out of the last <see cref="DiscoverDevices"/>.</summary>
+    public int HiddenVirtualDeviceCount { get; private set; }
+
+    /// <summary>Gets the HID path of a DirectInput device and checks whether it hangs off ViGEmBus.</summary>
+    private bool IsViGEmVirtualDirectInput(Guid instanceGuid)
+    {
+        if (_directInput == null) return false;
+        try
+        {
+            using var device = _directInput.CreateDevice(instanceGuid);
+            return VirtualDeviceDetector.IsViGEmVirtual(device.Properties.InterfacePath);
+        }
+        catch (Exception ex)
+        {
+            VortexLog.Warn("DirectInput", "No se pudo leer la ruta del dispositivo para detectar mandos virtuales.", ex);
+            return false;
+        }
+    }
+
     public IReadOnlyList<DetectedPhysicalDevice> DiscoverDevices()
     {
         var results = new List<DetectedPhysicalDevice>();
+        var hiddenVirtual = new List<string>();
         EnsureDirectInputInitialized();
 
         // 1. Enumerate via Vortice.DirectInput
@@ -109,6 +129,13 @@ public sealed class DirectInputAndHidProvider : IDisposable
                 var devices = _directInput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly);
                 foreach (var dev in devices)
                 {
+                    // Skip the virtual controllers VortexPad itself creates with ViGEm (feedback loop)
+                    if (IsViGEmVirtualDirectInput(dev.InstanceGuid))
+                    {
+                        hiddenVirtual.Add(dev.ProductName?.Trim() ?? "DirectInput");
+                        continue;
+                    }
+
                     int vid = dev.ProductGuid.ToByteArray()[0] | (dev.ProductGuid.ToByteArray()[1] << 8);
                     int pid = dev.ProductGuid.ToByteArray()[2] | (dev.ProductGuid.ToByteArray()[3] << 8);
 
@@ -141,6 +168,11 @@ public sealed class DirectInputAndHidProvider : IDisposable
                 NativeHidKind kind = GetNativeHidKind(hid.VendorID, hid.ProductID);
                 if (kind == NativeHidKind.None) continue;
                 if (SafeGetMaxInputLength(hid) < 64) continue; // only the gamepad interface
+                if (VirtualDeviceDetector.IsViGEmVirtual(hid.DevicePath))
+                {
+                    hiddenVirtual.Add($"{kind} virtual (ViGEm)");
+                    continue;
+                }
 
                 string name = kind == NativeHidKind.DualShock4
                     ? GetDualShock4DisplayName(hid.ProductID)
@@ -176,7 +208,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
                     hid.VendorID == 0x057E)   // Nintendo Switch Pro
                 {
                     bool alreadyAdded = results.Any(r => r.VendorId == hid.VendorID && r.ProductId == hid.ProductID);
-                    if (!alreadyAdded)
+                    if (!alreadyAdded && !VirtualDeviceDetector.IsViGEmVirtual(hid.DevicePath))
                     {
                         string name = SafeGetProductName(hid);
                         results.Add(new DetectedPhysicalDevice(
@@ -195,6 +227,12 @@ public sealed class DirectInputAndHidProvider : IDisposable
         catch (Exception ex)
         {
             VortexLog.Warn("HID", "Falló la enumeración de dispositivos HID.", ex);
+        }
+
+        HiddenVirtualDeviceCount = hiddenVirtual.Count;
+        if (hiddenVirtual.Count > 0)
+        {
+            VortexLog.Info("HID", $"Se ocultaron {hiddenVirtual.Count} mando(s) virtual(es) de ViGEm: {string.Join(", ", hiddenVirtual)}.");
         }
 
         // Always provide a Virtual Test / Calibration Device entry so the user can test curves/macros without hardware plugged in

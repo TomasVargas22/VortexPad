@@ -29,3 +29,20 @@ public class HidDevicePathsTests
         Assert.Null(HidDevicePaths.DevicePathToInstanceId(devicePath));
     }
 }
+
+public class VirtualDeviceSignaturesTests
+{
+    [Theory]
+    [InlineData(@"Nefarius\ViGEmBus\Gen1", true)]
+    [InlineData(@"ROOT\VIGEMBUS\0000", true)]
+    [InlineData(@"root\vigembus", true)]
+    [InlineData(@"USB\VID_054C&PID_05C4&REV_0100", false)]   // the ViGEm child itself looks like a real DS4
+    [InlineData(@"HID\VID_2DC8&PID_3106\7&ABC&0&0000", false)] // 8BitDo
+    [InlineData(@"ROOT\SYSTEM\0001", false)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    public void IsViGEmBusIdentifier_OnlyMatchesTheBus(string? id, bool expected)
+    {
+        Assert.Equal(expected, VirtualDeviceSignatures.IsViGEmBusIdentifier(id));
+    }
+}
