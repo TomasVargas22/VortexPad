@@ -69,8 +69,30 @@ public partial class MainWindow : Window
 
     private async void OnMainWindowLoaded(object sender, RoutedEventArgs e)
     {
+        // If the previous session closed unexpectedly with the controller hidden, make it visible again
+        await Task.Run(_hidHideService.RecoverPreviousSession);
         await RefreshDevicesListAsync();
         await StartEmulationEngineAsync();
+    }
+
+    /// <summary>
+    /// Hides (or restores) the selected physical controller according to the active profile.
+    /// Used when starting emulation and when the device or the setting changes while emulation is running.
+    /// </summary>
+    private async Task ApplyHidHideAsync()
+    {
+        bool hide = _activeProfile.HidePhysicalControllerWithHidHide;
+        var instanceIds = _inputProvider.ResolveHidInstanceIds(_selectedDevice);
+
+        await Task.Run(() =>
+        {
+            if (hide)
+                _hidHideService.HidePhysicalDevices(instanceIds);
+            else
+                _hidHideService.RestorePhysicalDevice();
+        });
+
+        TxtHidHideStatus.Text = _hidHideService.StatusText;
     }
 
     private void InitializeSystemTray()
@@ -206,26 +228,13 @@ public partial class MainWindow : Window
     private async Task StartEmulationEngineAsync()
     {
         var targetType = _activeProfile.TargetControllerType;
-        var hidePhys = _activeProfile.HidePhysicalControllerWithHidHide;
-        var devPath = _selectedDevice?.DeviceInstancePath;
         int hz = _activeProfile.PollingRateHz;
 
-        await Task.Run(() =>
-        {
-            _vigemService.StartVirtualController(targetType);
-            if (hidePhys && !string.IsNullOrWhiteSpace(devPath))
-            {
-                _hidHideService.HidePhysicalDevice(devPath);
-            }
-            else
-            {
-                _hidHideService.RestorePhysicalDevice();
-            }
-            _pollingLoop.Start(hz);
-        });
+        await Task.Run(() => _vigemService.StartVirtualController(targetType));
+        await ApplyHidHideAsync();
+        _pollingLoop.Start(hz);
 
         TxtVigemStatus.Text = _vigemService.StatusMessage;
-        TxtHidHideStatus.Text = _hidHideService.StatusText;
         BtnToggleEngine.Content = "⏹ Detener Emulación";
         TxtFooterStatus.Text = $"Emulación activa ({_activeProfile.Name}) a {_activeProfile.PollingRateHz} Hz.";
     }
@@ -398,7 +407,7 @@ public partial class MainWindow : Window
         await RefreshDevicesListAsync();
     }
 
-    private void CmbPhysicalDevices_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void CmbPhysicalDevices_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _selectedDevice = CmbPhysicalDevices.SelectedItem as DetectedPhysicalDevice;
         _inputProvider.SelectDevice(_selectedDevice);
@@ -407,6 +416,12 @@ public partial class MainWindow : Window
         {
             var sig = _aiAssistant.IdentifyController(_selectedDevice.VendorId, _selectedDevice.ProductId, _selectedDevice.DisplayName);
             TxtAiDeviceSignature.Text = sig.Summary;
+        }
+
+        // Unhide the previous controller and hide the new one
+        if (_pollingLoop.IsRunning)
+        {
+            await ApplyHidHideAsync();
         }
     }
 
@@ -511,13 +526,20 @@ public partial class MainWindow : Window
         _activeProfile.Gyro.ActivationMode = GyroActivationMode.AlwaysOn;
     }
 
-    private void ProfileSetting_Changed(object sender, RoutedEventArgs e)
+    private async void ProfileSetting_Changed(object sender, RoutedEventArgs e)
     {
         if (_suppressUiEvents || _activeProfile == null || ChkHidePhysical == null || ChkHairTriggers == null || ChkStickToWasd == null) return;
+
+        bool hideChanged = _activeProfile.HidePhysicalControllerWithHidHide != (ChkHidePhysical.IsChecked == true);
         _activeProfile.HidePhysicalControllerWithHidHide = ChkHidePhysical.IsChecked == true;
         _activeProfile.LeftTrigger.HairTriggerMode = ChkHairTriggers.IsChecked == true;
         _activeProfile.RightTrigger.HairTriggerMode = ChkHairTriggers.IsChecked == true;
         _activeProfile.BaseLayer.LeftStickToWasd = ChkStickToWasd.IsChecked == true;
+
+        if (hideChanged && _pollingLoop.IsRunning)
+        {
+            await ApplyHidHideAsync();
+        }
     }
 
     private void TurboSetting_Changed(object sender, RoutedEventArgs e)

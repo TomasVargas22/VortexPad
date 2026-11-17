@@ -150,7 +150,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
 
         // Always provide a Virtual Test / Calibration Device entry so the user can test curves/macros without hardware plugged in
         results.Add(new DetectedPhysicalDevice(
-            UniqueId: "vortexpad-virtual-test-pad",
+            UniqueId: VirtualTestPadId,
             DisplayName: "VortexPad Interactive Test Controller (Simulador en Vivo)",
             VendorId: 0x054C,
             ProductId: 0x0CE6,
@@ -160,6 +160,46 @@ public sealed class DirectInputAndHidProvider : IDisposable
             DirectInputGuid: Guid.Empty));
 
         return results;
+    }
+
+    public const string VirtualTestPadId = "vortexpad-virtual-test-pad";
+
+    /// <summary>
+    /// Returns the real HID instance IDs (HID\VID_...\...) of a physical device, the format HidHide expects.
+    /// - Native DualSense: its exact interface.
+    /// - DirectInput: every HID interface with the same VID/PID (DirectInput does not expose the instance path;
+    ///   with two identical controllers connected, both get hidden).
+    /// - Virtual simulator: none.
+    /// </summary>
+    public IReadOnlyList<string> ResolveHidInstanceIds(DetectedPhysicalDevice? device)
+    {
+        if (device == null || device.UniqueId == VirtualTestPadId) return Array.Empty<string>();
+
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (device.IsNativeDualSense)
+        {
+            string? id = HidDevicePaths.DevicePathToInstanceId(device.DeviceInstancePath);
+            if (id != null) ids.Add(id);
+            return ids.ToList();
+        }
+
+        if (device.VendorId == 0 && device.ProductId == 0) return Array.Empty<string>();
+
+        try
+        {
+            foreach (var hid in DeviceList.Local.GetHidDevices(device.VendorId, device.ProductId))
+            {
+                string? id = HidDevicePaths.DevicePathToInstanceId(hid.DevicePath);
+                if (id != null) ids.Add(id);
+            }
+        }
+        catch
+        {
+            // HID enumeration unavailable
+        }
+
+        return ids.ToList();
     }
 
     public bool SelectDevice(DetectedPhysicalDevice? device)
@@ -210,7 +250,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
             TimestampTicks = Stopwatch.GetTimestamp()
         };
 
-        if (EnableInteractiveDemoSignal || selectedDevice?.UniqueId == "vortexpad-virtual-test-pad")
+        if (EnableInteractiveDemoSignal || selectedDevice?.UniqueId == VirtualTestPadId)
         {
             PopulateDemoSignal(state);
             return state;
