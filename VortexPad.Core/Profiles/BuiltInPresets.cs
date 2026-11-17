@@ -260,6 +260,15 @@ public sealed class ProfileRepository
     public static ControllerProfile? DeserializeProfile(string json)
         => JsonSerializer.Deserialize<ControllerProfile>(json, JsonOptions);
 
+    /// <summary>
+    /// Exact deep copy (same Id and name). Used to publish an immutable snapshot of the profile
+    /// to the 1000 Hz loop while the UI keeps editing the original.
+    /// </summary>
+    public static ControllerProfile DeepCopy(ControllerProfile profile)
+        => JsonSerializer.Deserialize<ControllerProfile>(
+               JsonSerializer.SerializeToUtf8Bytes(profile, JsonOptions), JsonOptions)
+           ?? throw new InvalidOperationException("No se pudo copiar el perfil.");
+
     public IReadOnlyList<ControllerProfile> LoadAllWithBuiltIns()
     {
         var profilesById = new Dictionary<string, ControllerProfile>(StringComparer.OrdinalIgnoreCase);

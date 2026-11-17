@@ -151,6 +151,38 @@ public sealed class VirtualOutputState
     public byte LightbarB { get; set; } = 255;
 
     public bool IsButtonActive(ControllerButton button) => ActiveButtons.Contains(button);
+
+    /// <summary>Clears the state for reuse without allocating (the HashSets keep their capacity).</summary>
+    public void Reset(VirtualControllerType targetType)
+    {
+        TargetType = targetType;
+        LX = LY = RX = RY = 0;
+        L2 = R2 = 0;
+        MouseDeltaX = MouseDeltaY = 0;
+        ActiveButtons.Clear();
+        ActiveVirtualKeys.Clear();
+    }
+
+    /// <summary>Copies all of <paramref name="other"/> into this instance without allocating once capacity is warm.</summary>
+    public void CopyFrom(VirtualOutputState other)
+    {
+        TargetType = other.TargetType;
+        LX = other.LX;
+        LY = other.LY;
+        RX = other.RX;
+        RY = other.RY;
+        L2 = other.L2;
+        R2 = other.R2;
+        MouseDeltaX = other.MouseDeltaX;
+        MouseDeltaY = other.MouseDeltaY;
+        LightbarR = other.LightbarR;
+        LightbarG = other.LightbarG;
+        LightbarB = other.LightbarB;
+        ActiveButtons.Clear();
+        ActiveButtons.UnionWith(other.ActiveButtons);
+        ActiveVirtualKeys.Clear();
+        ActiveVirtualKeys.UnionWith(other.ActiveVirtualKeys);
+    }
 }
 
 public sealed class ForceFeedbackState

@@ -31,10 +31,15 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _uiRefreshTimer;
 
     private List<ControllerProfile> _profiles = new();
+    // _activeProfile: the copy the UI edits. _runtimeProfile: immutable snapshot that the 1000 Hz loop reads;
+    // it is replaced (never mutated) on every change via PublishRuntimeProfile().
     private ControllerProfile _activeProfile;
-    private DetectedPhysicalDevice? _selectedDevice;
-    private PhysicalInputState _latestPhysical = new();
-    private VirtualOutputState _latestVirtual = new();
+    private volatile ControllerProfile _runtimeProfile;
+    private volatile DetectedPhysicalDevice? _selectedDevice;
+    private volatile PhysicalInputState _latestPhysical = new();
+
+    // Virtual output reused frame to frame (no allocations) and published to the UI without locks
+    private readonly TripleBuffer<VirtualOutputState> _virtualFrames = new(() => new VirtualOutputState());
     private bool _suppressUiEvents;
     private WinForms.NotifyIcon? _trayIcon;
 
@@ -43,6 +48,7 @@ public partial class MainWindow : Window
         _suppressUiEvents = true;
         _profiles = _profileRepository.LoadAllWithBuiltIns().ToList();
         _activeProfile = _profiles.First();
+        _runtimeProfile = ProfileRepository.DeepCopy(_activeProfile);
 
         InitializeComponent();
 
@@ -223,6 +229,17 @@ public partial class MainWindow : Window
         {
             _suppressUiEvents = false;
         }
+
+        PublishRuntimeProfile();
+    }
+
+    /// <summary>
+    /// Publishes a snapshot of the profile being edited to the 1000 Hz loop.
+    /// Call after any change to <see cref="_activeProfile"/>.
+    /// </summary>
+    private void PublishRuntimeProfile()
+    {
+        _runtimeProfile = ProfileRepository.DeepCopy(_activeProfile);
     }
 
     private async Task StartEmulationEngineAsync()
@@ -255,19 +272,22 @@ public partial class MainWindow : Window
     private void OnHighPrecisionTick(double deltaSeconds)
     {
         var physical = _inputProvider.PollCurrentState(_selectedDevice);
-        var virtualOut = _pipelineEngine.ProcessFrame(physical, _activeProfile, deltaSeconds);
+        var profile = _runtimeProfile; // a single read per frame: the whole frame uses the same snapshot
+        var virtualOut = _virtualFrames.WriteBuffer;
+
+        _pipelineEngine.ProcessFrame(physical, profile, deltaSeconds, virtualOut);
 
         _vigemService.SubmitState(virtualOut);
         _kmInjector.ApplyOutput(virtualOut);
 
         _latestPhysical = physical;
-        _latestVirtual = virtualOut;
+        _virtualFrames.Publish();
     }
 
     private void UpdateLiveVisualizerUi()
     {
         var raw = _latestPhysical;
-        var outState = _latestVirtual;
+        var outState = _virtualFrames.ReadLatest();
 
         // Triggers
         BarL2.Value = outState.L2;
@@ -464,6 +484,7 @@ public partial class MainWindow : Window
             2 => VirtualControllerType.KeyboardMouse,
             _ => VirtualControllerType.Xbox360
         };
+        PublishRuntimeProfile();
         if (_pollingLoop.IsRunning)
         {
             _vigemService.StartVirtualController(_activeProfile.TargetControllerType);
@@ -492,6 +513,7 @@ public partial class MainWindow : Window
         };
         _activeProfile.LeftStick.CurveType = curve;
         _activeProfile.RightStick.CurveType = curve;
+        PublishRuntimeProfile();
         RedrawResponseCurveCanvas();
     }
 
@@ -508,6 +530,7 @@ public partial class MainWindow : Window
         _activeProfile.RightStick.Sensitivity = SldStickSensitivity.Value;
         _activeProfile.Gyro.SensitivityX = SldGyroSens.Value;
         _activeProfile.Gyro.SensitivityY = SldGyroSens.Value * 0.85;
+        PublishRuntimeProfile();
 
         UpdateSliderValueLabels();
         UpdateDeadzoneCircles();
@@ -524,6 +547,7 @@ public partial class MainWindow : Window
             _ => GyroOutputMode.Disabled
         };
         _activeProfile.Gyro.ActivationMode = GyroActivationMode.AlwaysOn;
+        PublishRuntimeProfile();
     }
 
     private async void ProfileSetting_Changed(object sender, RoutedEventArgs e)
@@ -535,6 +559,7 @@ public partial class MainWindow : Window
         _activeProfile.LeftTrigger.HairTriggerMode = ChkHairTriggers.IsChecked == true;
         _activeProfile.RightTrigger.HairTriggerMode = ChkHairTriggers.IsChecked == true;
         _activeProfile.BaseLayer.LeftStickToWasd = ChkStickToWasd.IsChecked == true;
+        PublishRuntimeProfile();
 
         if (hideChanged && _pollingLoop.IsRunning)
         {
@@ -555,6 +580,7 @@ public partial class MainWindow : Window
         }
         existing.Enabled = ChkTurboSouth.IsChecked == true;
         existing.FrequencyHz = SldTurboHz.Value;
+        PublishRuntimeProfile();
     }
 
     private void BtnAiCalibrateDrift_Click(object sender, RoutedEventArgs e)
@@ -595,14 +621,18 @@ public partial class MainWindow : Window
     {
         ControllerButton[] combo = { ControllerButton.South, ControllerButton.East, ControllerButton.West, ControllerButton.North };
         TxtFooterStatus.Text = "Ejecutando Macro Combo: A → B → X → Y...";
+
+        // Own copy: the loop's buffers are never touched from the UI.
+        // (Pending in Phase 4: inject the macro into the pipeline so the next tick does not overwrite it.)
+        var comboState = new VirtualOutputState();
+        comboState.CopyFrom(_virtualFrames.ReadLatest());
         foreach (var btn in combo)
         {
-            _latestVirtual.ActiveButtons.Add(btn);
-            _vigemService.SubmitState(_latestVirtual);
-            UpdateLiveVisualizerUi();
+            comboState.ActiveButtons.Add(btn);
+            _vigemService.SubmitState(comboState);
             await Task.Delay(90);
-            _latestVirtual.ActiveButtons.Remove(btn);
-            _vigemService.SubmitState(_latestVirtual);
+            comboState.ActiveButtons.Remove(btn);
+            _vigemService.SubmitState(comboState);
         }
         TxtFooterStatus.Text = "Macro Combo completado.";
     }

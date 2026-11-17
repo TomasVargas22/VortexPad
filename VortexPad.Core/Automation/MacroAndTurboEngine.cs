@@ -17,6 +17,18 @@ public sealed class MacroAndTurboEngine
     private readonly Dictionary<string, ActiveMacroExecution> _activeMacros = new();
     private readonly HashSet<string> _prevMacroTriggers = new();
     private readonly GyroProcessor _gyroProcessor = new();
+    private readonly List<string> _finishedMacroIds = new();
+
+    // Enum.GetValues allocates an array on every call: compute it once
+    private static readonly ControllerButton[] AllButtons =
+        Enum.GetValues<ControllerButton>().Where(b => b != ControllerButton.None).ToArray();
+
+    private static readonly int ButtonSlotCount = AllButtons.Max(b => (int)b) + 1;
+
+    // Per-profile cache, rebuilt only when the profile reference changes (see InvalidateProfileCache)
+    private ControllerProfile? _cachedProfile;
+    private readonly TurboButtonConfig?[] _turboByButton = new TurboButtonConfig?[ButtonSlotCount];
+    private byte _cachedLightR, _cachedLightG, _cachedLightB;
 
     private sealed class ActiveMacroExecution
     {
@@ -33,6 +45,35 @@ public sealed class MacroAndTurboEngine
         _activeMacros.Clear();
         _prevMacroTriggers.Clear();
         _gyroProcessor.Reset();
+        InvalidateProfileCache();
+    }
+
+    /// <summary>
+    /// Forces the precomputed data (turbo per button, lightbar color) to be rebuilt on the next frame.
+    /// Only needed if a profile is mutated after being passed to <see cref="ProcessFrame(PhysicalInputState, ControllerProfile, double, VirtualOutputState)"/>;
+    /// the recommended pattern is to publish a new instance (snapshot) on every change.
+    /// </summary>
+    public void InvalidateProfileCache()
+    {
+        _cachedProfile = null;
+    }
+
+    private void EnsureProfileCache(ControllerProfile profile)
+    {
+        if (ReferenceEquals(profile, _cachedProfile)) return;
+
+        Array.Clear(_turboByButton);
+        foreach (var turbo in profile.TurboConfigs)
+        {
+            int slot = (int)turbo.Button;
+            if (slot > 0 && slot < _turboByButton.Length)
+            {
+                _turboByButton[slot] = turbo;
+            }
+        }
+
+        ParseLightbarColor(profile.LightbarHex, out _cachedLightR, out _cachedLightG, out _cachedLightB);
+        _cachedProfile = profile;
     }
 
     /// <summary>
@@ -68,21 +109,34 @@ public sealed class MacroAndTurboEngine
 
     /// <summary>
     /// Full real-time pipeline transforming PhysicalInputState + ControllerProfile into VirtualOutputState.
+    /// Convenience overload that allocates a new output; the 1000 Hz loop uses the one that reuses the output.
     /// </summary>
     public VirtualOutputState ProcessFrame(
         PhysicalInputState physical,
         ControllerProfile profile,
         double deltaSeconds)
     {
-        var output = new VirtualOutputState
-        {
-            TargetType = profile.TargetControllerType
-        };
+        var output = new VirtualOutputState();
+        ProcessFrame(physical, profile, deltaSeconds, output);
+        return output;
+    }
 
-        ParseLightbarColor(profile.LightbarHex, out byte r, out byte g, out byte b);
-        output.LightbarR = r;
-        output.LightbarG = g;
-        output.LightbarB = b;
+    /// <summary>
+    /// Real-time pipeline with no allocations in steady state: fills <paramref name="output"/> (reset first).
+    /// <paramref name="profile"/> must not be mutated while it is in use; to change settings, pass a new instance.
+    /// </summary>
+    public void ProcessFrame(
+        PhysicalInputState physical,
+        ControllerProfile profile,
+        double deltaSeconds,
+        VirtualOutputState output)
+    {
+        EnsureProfileCache(profile);
+
+        output.Reset(profile.TargetControllerType);
+        output.LightbarR = _cachedLightR;
+        output.LightbarG = _cachedLightG;
+        output.LightbarB = _cachedLightB;
 
         // 1. Resolve active mapping layer (Shift Layer if modifier button is held, otherwise Base Layer)
         MappingLayer activeLayer = ResolveActiveLayer(physical, profile);
@@ -139,12 +193,8 @@ public sealed class MacroAndTurboEngine
         output.R2 = r2;
 
         // 5. Process buttons with Shift Remapping + Turbo
-        var turboByButton = profile.TurboConfigs.ToDictionary(t => t.Button, t => t);
-
-        foreach (ControllerButton rawBtn in Enum.GetValues<ControllerButton>())
+        foreach (ControllerButton rawBtn in AllButtons)
         {
-            if (rawBtn == ControllerButton.None) continue;
-
             // Skip shift modifier button itself if it's currently activating a shift layer
             if (activeLayer.ShiftModifierButton.HasValue && rawBtn == activeLayer.ShiftModifierButton.Value)
             {
@@ -152,7 +202,8 @@ public sealed class MacroAndTurboEngine
             }
 
             bool isHeld = physical.IsPressed(rawBtn);
-            if (turboByButton.TryGetValue(rawBtn, out var turboCfg))
+            var turboCfg = _turboByButton[(int)rawBtn];
+            if (turboCfg != null)
             {
                 isHeld = EvaluateTurbo(rawBtn, isHeld, turboCfg, deltaSeconds);
             }
@@ -179,8 +230,6 @@ public sealed class MacroAndTurboEngine
 
         // 6. Advance and apply Macros
         UpdateMacros(physical, profile, deltaSeconds, output);
-
-        return output;
     }
 
     private static MappingLayer ResolveActiveLayer(PhysicalInputState physical, ControllerProfile profile)
@@ -235,7 +284,8 @@ public sealed class MacroAndTurboEngine
             }
         }
 
-        var finishedMacroIds = new List<string>();
+        var finishedMacroIds = _finishedMacroIds;
+        finishedMacroIds.Clear();
 
         foreach (var (macroId, exec) in _activeMacros)
         {

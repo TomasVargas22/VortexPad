@@ -54,11 +54,27 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
 
     public bool Enabled { get; set; } = true;
 
+    private static readonly int InputSize = Marshal.SizeOf<INPUT>();
+
+    // Buffers reused on every tick so the 1000 Hz loop does not allocate
+    private INPUT[] _inputBuffer = new INPUT[32];
+    private int _inputCount;
+    private readonly List<ushort> _keysToRelease = new();
+
+    private void AddInput(in INPUT input)
+    {
+        if (_inputCount == _inputBuffer.Length)
+        {
+            Array.Resize(ref _inputBuffer, _inputBuffer.Length * 2);
+        }
+        _inputBuffer[_inputCount++] = input;
+    }
+
     public void ApplyOutput(VirtualOutputState state)
     {
         if (!Enabled) return;
 
-        var inputs = new List<INPUT>();
+        _inputCount = 0;
 
         // 1. Sub-pixel mouse movement accumulation
         double totalX = state.MouseDeltaX + _residualMouseX;
@@ -70,7 +86,7 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
 
         if (moveX != 0 || moveY != 0)
         {
-            inputs.Add(new INPUT
+            AddInput(new INPUT
             {
                 type = INPUT_MOUSE,
                 U = new InputUnion
@@ -90,24 +106,26 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
         {
             if (_currentlyPressedKeys.Add(vk))
             {
-                inputs.Add(CreateKeyInput(vk, keyUp: false));
+                AddInput(CreateKeyInput(vk, keyUp: false));
             }
         }
 
-        var keysToRelease = _currentlyPressedKeys
-            .Where(k => !state.ActiveVirtualKeys.Contains(k))
-            .ToList();
-
-        foreach (ushort vk in keysToRelease)
+        _keysToRelease.Clear();
+        foreach (ushort vk in _currentlyPressedKeys)
         {
-            _currentlyPressedKeys.Remove(vk);
-            inputs.Add(CreateKeyInput(vk, keyUp: true));
+            if (!state.ActiveVirtualKeys.Contains(vk)) _keysToRelease.Add(vk);
         }
 
-        if (inputs.Count > 0)
+        foreach (ushort vk in _keysToRelease)
         {
-            INPUT[] arr = inputs.ToArray();
-            _ = SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+            _currentlyPressedKeys.Remove(vk);
+            AddInput(CreateKeyInput(vk, keyUp: true));
+        }
+
+        if (_inputCount > 0)
+        {
+            // SendInput only reads the first _inputCount entries of the array
+            _ = SendInput((uint)_inputCount, _inputBuffer, InputSize);
         }
     }
 
@@ -122,7 +140,7 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
 
         if (inputs.Length > 0)
         {
-            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+            _ = SendInput((uint)inputs.Length, inputs, InputSize);
         }
     }
 
