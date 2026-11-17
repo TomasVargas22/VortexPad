@@ -48,7 +48,7 @@ public class DualSenseReportParserTests
         bool ok = DualSenseReportParser.TryParseInputReport(report, DualSenseCalibration.Nominal, state, out var conn);
 
         Assert.True(ok);
-        Assert.Equal(DualSenseConnection.Usb, conn);
+        Assert.Equal(HidConnection.Usb, conn);
         Assert.Equal(1.0, state.LX, 6);
         Assert.Equal(1.0, state.LY, 6);
         Assert.Equal(-1.0, state.RX, 6);
@@ -106,7 +106,7 @@ public class DualSenseReportParserTests
         var state = new PhysicalInputState();
         Assert.True(DualSenseReportParser.TryParseInputReport(report, DualSenseCalibration.Nominal, state, out var conn));
 
-        Assert.Equal(DualSenseConnection.Bluetooth, conn);
+        Assert.Equal(HidConnection.Bluetooth, conn);
         Assert.Equal(1.0, state.LX, 6);
         Assert.Contains(ControllerButton.West, state.PressedButtons);
         Assert.Contains(ControllerButton.Paddle1, state.PressedButtons);

@@ -6,6 +6,14 @@ using VortexPad.Core.Models;
 
 namespace VortexPad.Input;
 
+/// <summary>Native HID reader used for a device instead of DirectInput.</summary>
+public enum NativeHidKind
+{
+    None,
+    DualSense,
+    DualShock4
+}
+
 public sealed record DetectedPhysicalDevice(
     string UniqueId,
     string DisplayName,
@@ -16,8 +24,12 @@ public sealed record DetectedPhysicalDevice(
     bool IsHid,
     Guid DirectInputGuid)
 {
-    /// <summary>DualSense / DualSense Edge read over native HID (correct mapping + gyro), not DirectInput.</summary>
-    public bool IsNativeDualSense { get; init; }
+    /// <summary>Sony controller read over native HID (correct mapping + gyro), not DirectInput.</summary>
+    public NativeHidKind NativeHid { get; init; }
+
+    public bool IsNativeHid => NativeHid != NativeHidKind.None;
+    public bool IsNativeDualSense => NativeHid == NativeHidKind.DualSense;
+    public bool IsNativeDualShock4 => NativeHid == NativeHidKind.DualShock4;
 }
 
 public sealed class DirectInputAndHidProvider : IDisposable
@@ -26,6 +38,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
     private IDirectInputDevice8? _activeDInputDevice;
     private Guid _activeDeviceGuid;
     private DualSenseHidReader? _dualSenseReader;
+    private DualShock4HidReader? _dualShock4Reader;
     private readonly object _sync = new();
 
     // Optional manual/simulated override for live interactive testing in UI when no controller is plugged in
@@ -33,7 +46,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
     private readonly Stopwatch _demoClock = Stopwatch.StartNew();
 
     /// <summary>Status of the native HID reader, or null if the active device does not use it.</summary>
-    public string? NativeHidStatus => _dualSenseReader?.StatusText;
+    public string? NativeHidStatus => _dualSenseReader?.StatusText ?? _dualShock4Reader?.StatusText;
 
     public DirectInputAndHidProvider()
     {
@@ -89,16 +102,19 @@ public sealed class DirectInputAndHidProvider : IDisposable
         // 2. Enumerate HID gamepads via HidSharp (UsagePage 0x01 Generic Desktop, Usage 0x04 Joystick or 0x05 Gamepad)
         try
         {
-            // 2a. DualSense / Edge: native HID reading replaces the DirectInput entry
+            // 2a. DualSense / Edge and DualShock 4: native HID reading replaces the DirectInput entry
             //     (DirectInput gives the wrong button order, swaps the right stick with the triggers and has no gyro).
-            var nativeDualSense = new List<DetectedPhysicalDevice>();
+            var nativeSony = new List<DetectedPhysicalDevice>();
             foreach (var hid in DeviceList.Local.GetHidDevices(DualSenseReportParser.SonyVendorId))
             {
-                if (!DualSenseReportParser.IsDualSense(hid.VendorID, hid.ProductID)) continue;
+                NativeHidKind kind = GetNativeHidKind(hid.VendorID, hid.ProductID);
+                if (kind == NativeHidKind.None) continue;
                 if (SafeGetMaxInputLength(hid) < 64) continue; // only the gamepad interface
 
-                string name = SafeGetProductName(hid);
-                nativeDualSense.Add(new DetectedPhysicalDevice(
+                string name = kind == NativeHidKind.DualShock4
+                    ? GetDualShock4DisplayName(hid.ProductID)
+                    : SafeGetProductName(hid);
+                nativeSony.Add(new DetectedPhysicalDevice(
                     UniqueId: $"hid-native-{hid.DevicePath}",
                     DisplayName: $"{name} [HID nativo]",
                     VendorId: hid.VendorID,
@@ -108,22 +124,24 @@ public sealed class DirectInputAndHidProvider : IDisposable
                     IsHid: true,
                     DirectInputGuid: Guid.Empty)
                 {
-                    IsNativeDualSense = true
+                    NativeHid = kind
                 });
             }
 
-            if (nativeDualSense.Count > 0)
+            if (nativeSony.Count > 0)
             {
-                results.RemoveAll(r => r.IsDirectInput && DualSenseReportParser.IsDualSense(r.VendorId, r.ProductId));
-                results.InsertRange(0, nativeDualSense);
+                // Drop the DirectInput entries of every Sony model that is read natively
+                results.RemoveAll(r => r.IsDirectInput &&
+                    nativeSony.Any(n => n.VendorId == r.VendorId && n.ProductId == r.ProductId));
+                results.InsertRange(0, nativeSony);
             }
 
-            // 2b. Other Sony (DualShock 4) and Nintendo pads: listing only, read through DirectInput
+            // 2b. Other Sony and Nintendo pads: listing only, read through DirectInput
             foreach (var hid in DeviceList.Local.GetHidDevices())
             {
-                if (DualSenseReportParser.IsDualSense(hid.VendorID, hid.ProductID)) continue;
+                if (GetNativeHidKind(hid.VendorID, hid.ProductID) != NativeHidKind.None) continue;
 
-                if (hid.VendorID == 0x054C || // Sony DualShock 4
+                if (hid.VendorID == 0x054C || // Other Sony pads
                     hid.VendorID == 0x057E)   // Nintendo Switch Pro
                 {
                     bool alreadyAdded = results.Any(r => r.VendorId == hid.VendorID && r.ProductId == hid.ProductID);
@@ -164,9 +182,43 @@ public sealed class DirectInputAndHidProvider : IDisposable
 
     public const string VirtualTestPadId = "vortexpad-virtual-test-pad";
 
+    private static NativeHidKind GetNativeHidKind(int vendorId, int productId)
+    {
+        if (DualSenseReportParser.IsDualSense(vendorId, productId)) return NativeHidKind.DualSense;
+        if (DualShock4ReportParser.IsDualShock4(vendorId, productId)) return NativeHidKind.DualShock4;
+        return NativeHidKind.None;
+    }
+
+    // The DS4 reports a generic "Wireless Controller" product name, so use a recognizable one
+    private static string GetDualShock4DisplayName(int productId) => productId switch
+    {
+        DualShock4ReportParser.DualShock4V1ProductId => "DualShock 4 (v1)",
+        DualShock4ReportParser.WirelessAdapterProductId => "DualShock 4 (adaptador inalámbrico)",
+        _ => "DualShock 4"
+    };
+
+    // Bluetooth HID service GUID present in the device path of BT HID devices
+    private const string BluetoothHidServiceGuid = "00001124-0000-1000-8000-00805f9b34fb";
+
+    private static bool IsLikelyBluetooth(string devicePath)
+    {
+        if (devicePath.Contains(BluetoothHidServiceGuid, StringComparison.OrdinalIgnoreCase)) return true;
+        try
+        {
+            var hid = DeviceList.Local.GetHidDevices()
+                .FirstOrDefault(d => string.Equals(d.DevicePath, devicePath, StringComparison.OrdinalIgnoreCase));
+            // USB reports are 64 bytes; BT exposes larger reports (0x11..0x19)
+            return hid != null && SafeGetMaxInputLength(hid) > 64;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Returns the real HID instance IDs (HID\VID_...\...) of a physical device, the format HidHide expects.
-    /// - Native DualSense: its exact interface.
+    /// - Native DualSense / DualShock 4: its exact interface.
     /// - DirectInput: every HID interface with the same VID/PID (DirectInput does not expose the instance path;
     ///   with two identical controllers connected, both get hidden).
     /// - Virtual simulator: none.
@@ -177,7 +229,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
 
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        if (device.IsNativeDualSense)
+        if (device.IsNativeHid)
         {
             string? id = HidDevicePaths.DevicePathToInstanceId(device.DeviceInstancePath);
             if (id != null) ids.Add(id);
@@ -207,12 +259,21 @@ public sealed class DirectInputAndHidProvider : IDisposable
         lock (_sync)
         {
             ReleaseActiveDInputDevice();
-            ReleaseDualSenseReader();
+            ReleaseNativeHidReaders();
 
             if (device is { IsNativeDualSense: true })
             {
                 _dualSenseReader = new DualSenseHidReader(device.DeviceInstancePath);
                 _dualSenseReader.Start();
+                _activeDeviceGuid = Guid.Empty;
+                return true;
+            }
+
+            if (device is { IsNativeDualShock4: true })
+            {
+                _dualShock4Reader = new DualShock4HidReader(
+                    device.DeviceInstancePath, IsLikelyBluetooth(device.DeviceInstancePath));
+                _dualShock4Reader.Start();
                 _activeDeviceGuid = Guid.Empty;
                 return true;
             }
@@ -256,11 +317,18 @@ public sealed class DirectInputAndHidProvider : IDisposable
             return state;
         }
 
-        var reader = _dualSenseReader;
-        if (reader != null)
+        // Non-blocking: copies the latest report parsed by the reader thread
+        var dualSense = _dualSenseReader;
+        if (dualSense != null)
         {
-            // Non-blocking: copies the latest report parsed by the reader thread
-            reader.CopyLatestInto(state);
+            dualSense.CopyLatestInto(state);
+            return state;
+        }
+
+        var dualShock4 = _dualShock4Reader;
+        if (dualShock4 != null)
+        {
+            dualShock4.CopyLatestInto(state);
             return state;
         }
 
@@ -386,10 +454,12 @@ public sealed class DirectInputAndHidProvider : IDisposable
         catch { return 0; }
     }
 
-    private void ReleaseDualSenseReader()
+    private void ReleaseNativeHidReaders()
     {
         _dualSenseReader?.Dispose();
         _dualSenseReader = null;
+        _dualShock4Reader?.Dispose();
+        _dualShock4Reader = null;
     }
 
     private void ReleaseActiveDInputDevice()
@@ -407,7 +477,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
         lock (_sync)
         {
             ReleaseActiveDInputDevice();
-            ReleaseDualSenseReader();
+            ReleaseNativeHidReaders();
             _directInput?.Dispose();
             _directInput = null;
         }

@@ -16,7 +16,7 @@ La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
 |---|---|---|
 | `VortexPad.Core` | net8.0 | Modelos (`Models/ControllerState.cs`), bucle de 1000 Hz (`Engine/HighPrecisionPollingLoop`), `Processing/SignalProcessor` + `GyroProcessor`, `Automation/MacroAndTurboEngine.ProcessFrame`, perfiles/presets + `ProfileRepository` (en `Profiles/BuiltInPresets.cs`), parsers HID puros en `Hid/` |
 | `VortexPad.AI` | net8.0 | `SmartMapperAndCalibrator`: identificación VID:PID, calibración de drift 3σ, tuning por género |
-| `VortexPad.Input` | net8.0-windows | `DirectInputAndHidProvider` (Vortice.DirectInput + HidSharp), `DualSenseHidReader` (hilo propio con snapshot y reconexión), `ForegroundGameWatcher` |
+| `VortexPad.Input` | net8.0-windows | `DirectInputAndHidProvider` (Vortice.DirectInput + HidSharp), `SonyHidReaderBase` (hilo propio con snapshot y reconexión) con `DualSenseHidReader` y `DualShock4HidReader`, `ForegroundGameWatcher` |
 | `VortexPad.Emulation` | net8.0-windows | `ViGEmVirtualControllerService`, `NativeKeyboardMouseInjector`, `HidHideIntegrationService` |
 | `VortexPad.App` | net8.0-windows | WPF `MainWindow` (code-behind, sin MVVM todavía) + icono de bandeja |
 | `VortexPad.CoreTests` | net8.0 | xUnit; referencia solo Core y AI |
@@ -40,3 +40,4 @@ Flujo por tick: `OnHighPrecisionTick` → `PollCurrentState` (snapshot, no bloqu
 - Signos de giro del giroscopio del DualSense (`InvertYaw` / `InvertPitch`).
 - Formato de salida de `HidHideCLI --cloak-state` y `--dev-list` (se asume `--cloak-on`/`--cloak-off` y rutas entre comillas).
 - Instance IDs de HidHide con DualSense por Bluetooth; mandos Xbox por XInput pueden seguir visibles aunque se oculte su interfaz HID.
+- DualShock 4 por HID: layout de calibración del adaptador inalámbrico 0x0BA0 (se detecta por signos plus/minus), signos del giroscopio y que BT pase al reporte 0x11 tras leer el feature 0x05.
