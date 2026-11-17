@@ -265,7 +265,8 @@ public sealed class ViGEmVirtualControllerService : IDisposable
             SmallMotor = e.SmallMotor / 255.0,
             LedR = e.LightbarColor.Red,
             LedG = e.LightbarColor.Green,
-            LedB = e.LightbarColor.Blue
+            LedB = e.LightbarColor.Blue,
+            HasLightbar = true
         };
         CurrentFeedback = state;
         FeedbackReceived?.Invoke(state);

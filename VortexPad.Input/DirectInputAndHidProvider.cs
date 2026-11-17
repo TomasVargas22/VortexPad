@@ -48,6 +48,22 @@ public sealed class DirectInputAndHidProvider : IDisposable
     /// <summary>Status of the native HID reader, or null if the active device does not use it.</summary>
     public string? NativeHidStatus => _dualSenseReader?.StatusText ?? _dualShock4Reader?.StatusText;
 
+    private SonyOutputState? _lastOutput;
+
+    /// <summary>true if the active device accepts vibration/LED (DualSense or DualShock 4 over native HID).</summary>
+    public bool SupportsOutput => _dualSenseReader != null || _dualShock4Reader != null;
+
+    /// <summary>
+    /// Sends vibration and LED to the physical controller (only native HID Sony pads; ignored otherwise).
+    /// It does not block: the reader thread writes it. It is also applied to the next selected device.
+    /// </summary>
+    public void SetOutput(in SonyOutputState state)
+    {
+        _lastOutput = state;
+        _dualSenseReader?.SetOutput(state);
+        _dualShock4Reader?.SetOutput(state);
+    }
+
     public DirectInputAndHidProvider()
     {
         // Lazy-initialize DirectInput on background/poll thread so UI startup is instantaneous
@@ -264,6 +280,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
             if (device is { IsNativeDualSense: true })
             {
                 _dualSenseReader = new DualSenseHidReader(device.DeviceInstancePath);
+                if (_lastOutput is { } output) _dualSenseReader.SetOutput(output);
                 _dualSenseReader.Start();
                 _activeDeviceGuid = Guid.Empty;
                 return true;
@@ -273,6 +290,7 @@ public sealed class DirectInputAndHidProvider : IDisposable
             {
                 _dualShock4Reader = new DualShock4HidReader(
                     device.DeviceInstancePath, IsLikelyBluetooth(device.DeviceInstancePath));
+                if (_lastOutput is { } output) _dualShock4Reader.SetOutput(output);
                 _dualShock4Reader.Start();
                 _activeDeviceGuid = Guid.Empty;
                 return true;

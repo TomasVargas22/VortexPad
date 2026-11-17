@@ -27,6 +27,14 @@ public sealed class DualSenseHidReader : SonyHidReaderBase<DualSenseCalibration>
         return feature != null && DualSenseCalibration.TryParse(feature, out var cal) ? cal : DualSenseCalibration.Nominal;
     }
 
+    protected override int BuildOutputReport(
+        in SonyOutputState state, HidConnection connection, ref byte sequence, bool firstAfterConnect, Span<byte> buffer)
+    {
+        int length = DualSenseOutputReport.Build(state, connection, sequence, firstAfterConnect, buffer);
+        sequence = (byte)((sequence + 1) & 0x0F);
+        return length;
+    }
+
     protected override bool TryParseReport(
         ReadOnlySpan<byte> report, DualSenseCalibration calibration, PhysicalInputState state, out HidConnection connection) =>
         DualSenseReportParser.TryParseInputReport(report, calibration, state, out connection);

@@ -160,4 +160,7 @@ public sealed class ForceFeedbackState
     public byte LedR { get; set; }
     public byte LedG { get; set; }
     public byte LedB { get; set; }
+
+    /// <summary>true if the game set the lightbar color (only the virtual DS4 sends it; Xbox 360 does not).</summary>
+    public bool HasLightbar { get; set; }
 }

@@ -32,6 +32,12 @@ public partial class MainWindow : Window
 
     private List<ControllerProfile> _profiles = new();
     private ControllerProfile _activeProfile;
+
+    // Physical controller output (vibration + LED). ViGEm fires feedback on its own thread, so it reads
+    // an immutable copy of the profile settings published from the UI thread.
+    private sealed record FeedbackSettings(ForceFeedbackConfiguration Config, string LightbarHex);
+    private volatile FeedbackSettings _feedbackSettings = new(new ForceFeedbackConfiguration(), "#00E5FF");
+    private volatile ForceFeedbackState? _lastGameFeedback;
     private DetectedPhysicalDevice? _selectedDevice;
     private PhysicalInputState _latestPhysical = new();
     private VirtualOutputState _latestVirtual = new();
@@ -223,6 +229,35 @@ public partial class MainWindow : Window
         {
             _suppressUiEvents = false;
         }
+
+        PublishFeedbackSettings();
+    }
+
+    /// <summary>Copies the profile's vibration gains and lightbar color, and re-sends the output to the controller.</summary>
+    private void PublishFeedbackSettings()
+    {
+        var ff = _activeProfile.ForceFeedback;
+        _feedbackSettings = new FeedbackSettings(
+            new ForceFeedbackConfiguration
+            {
+                Enabled = ff.Enabled,
+                OverallStrength = ff.OverallStrength,
+                LargeMotorGain = ff.LargeMotorGain,
+                SmallMotorGain = ff.SmallMotorGain
+            },
+            _activeProfile.LightbarHex);
+        PushPhysicalOutput();
+    }
+
+    /// <summary>
+    /// Sends vibration (from the game, with the profile gains) and LED to the physical controller.
+    /// It does not block: the HID reader thread writes it. Safe from any thread.
+    /// </summary>
+    private void PushPhysicalOutput(ForceFeedbackState? overrideFeedback = null)
+    {
+        var settings = _feedbackSettings;
+        var output = ForceFeedbackMixer.Compute(overrideFeedback ?? _lastGameFeedback, settings.Config, settings.LightbarHex);
+        _inputProvider.SetOutput(output);
     }
 
     private async Task StartEmulationEngineAsync()
@@ -245,6 +280,10 @@ public partial class MainWindow : Window
         _vigemService.StopVirtualController();
         _kmInjector.ReleaseAllKeys();
         _hidHideService.RestorePhysicalDevice();
+
+        // No game anymore: stop the vibration (the LED keeps the profile color)
+        _lastGameFeedback = null;
+        PushPhysicalOutput();
 
         TxtVigemStatus.Text = "Detenido";
         TxtHidHideStatus.Text = _hidHideService.StatusText;
@@ -411,6 +450,7 @@ public partial class MainWindow : Window
     {
         _selectedDevice = CmbPhysicalDevices.SelectedItem as DetectedPhysicalDevice;
         _inputProvider.SelectDevice(_selectedDevice);
+        PushPhysicalOutput(); // LED/vibration of the active profile on the new controller
 
         if (_selectedDevice != null)
         {
@@ -609,11 +649,21 @@ public partial class MainWindow : Window
 
     private async void BtnTestRumble_Click(object sender, RoutedEventArgs e)
     {
-        BarRumbleLarge.Value = 0.85;
-        BarRumbleSmall.Value = 0.65;
+        var test = new ForceFeedbackState { LargeMotor = 0.85, SmallMotor = 0.65 };
+
+        BarRumbleLarge.Value = test.LargeMotor;
+        BarRumbleSmall.Value = test.SmallMotor;
+        PushPhysicalOutput(test); // vibrates the real controller with the profile gains
+
         await Task.Delay(450);
+
         BarRumbleLarge.Value = 0;
         BarRumbleSmall.Value = 0;
+        PushPhysicalOutput(); // back to the game's vibration (or off)
+
+        TxtFooterStatus.Text = _inputProvider.SupportsOutput
+            ? "Prueba de vibración enviada al mando físico."
+            : "El mando seleccionado no admite vibración (solo DualSense / DualShock 4 por HID nativo).";
     }
 
     private void OnPollingTelemetryUpdated(PollingTelemetry telemetry)
@@ -627,6 +677,10 @@ public partial class MainWindow : Window
 
     private void OnControllerFeedbackReceived(ForceFeedbackState feedback)
     {
+        // ViGEm thread: forward to the physical controller right away, without going through the UI
+        _lastGameFeedback = feedback;
+        PushPhysicalOutput();
+
         Dispatcher.BeginInvoke(() =>
         {
             BarRumbleLarge.Value = feedback.LargeMotor;

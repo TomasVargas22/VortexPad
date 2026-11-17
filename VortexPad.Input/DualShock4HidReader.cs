@@ -43,6 +43,10 @@ public sealed class DualShock4HidReader : SonyHidReaderBase<DualShock4Calibratio
         return DualShock4Calibration.Nominal;
     }
 
+    protected override int BuildOutputReport(
+        in SonyOutputState state, HidConnection connection, ref byte sequence, bool firstAfterConnect, Span<byte> buffer) =>
+        DualShock4OutputReport.Build(state, connection, buffer);
+
     protected override bool TryParseReport(
         ReadOnlySpan<byte> report, DualShock4Calibration calibration, PhysicalInputState state, out HidConnection connection) =>
         DualShock4ReportParser.TryParseInputReport(report, calibration, state, out connection);

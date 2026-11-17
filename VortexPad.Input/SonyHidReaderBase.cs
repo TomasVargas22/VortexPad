@@ -16,6 +16,21 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan CalibrationRetryDelay = TimeSpan.FromSeconds(3);
 
+    // Minimum gap between output reports: the game can change vibration hundreds of times per second
+    private static readonly long MinOutputIntervalTicks = System.Diagnostics.Stopwatch.Frequency / 125; // 8 ms
+    private const int MaxSonyOutputReportLength = 78;
+
+    // Output (vibration / LED): the UI or ViGEm sets the desired state, the reader thread sends it when it changes
+    private readonly object _outputSync = new();
+    private readonly object _writeLock = new();
+    private SonyOutputState? _desiredOutput;
+    private SonyOutputState? _lastSentOutput;
+    private bool _firstOutputAfterConnect;
+    private byte _outputSequence;
+    private long _lastOutputTimestamp;
+    private int _maxOutputReportLength;
+    private byte[] _outputBuffer = new byte[MaxSonyOutputReportLength];
+
     private readonly string _devicePath;
     private readonly object _sync = new();
     private readonly PhysicalInputState _latest = new();
@@ -37,6 +52,25 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
 
     /// <summary>Reads the IMU calibration feature report. Must not throw; returns the nominal one on failure.</summary>
     protected abstract TCalibration ReadCalibration(HidDevice device, HidStream stream);
+
+    /// <summary>
+    /// Builds the output report (vibration + LED) for the given link into <paramref name="buffer"/> and returns its length.
+    /// <paramref name="sequence"/> is a per-connection counter the builder may use and advance (DualSense BT).
+    /// </summary>
+    protected abstract int BuildOutputReport(
+        in SonyOutputState state, HidConnection connection, ref byte sequence, bool firstAfterConnect, Span<byte> buffer);
+
+    /// <summary>
+    /// Sets the vibration and LED to send to the controller. It does not block: the reader thread sends it
+    /// at most every 8 ms and only if it changed. It is re-sent automatically after a reconnection.
+    /// </summary>
+    public void SetOutput(in SonyOutputState state)
+    {
+        lock (_outputSync)
+        {
+            _desiredOutput = state;
+        }
+    }
 
     /// <summary>Parses one input report into <paramref name="state"/>.</summary>
     protected abstract bool TryParseReport(
@@ -79,6 +113,13 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
     public void Stop()
     {
         _running = false;
+        // Do not leave the controller vibrating (the LED keeps its color)
+        SonyOutputState current;
+        lock (_outputSync)
+        {
+            current = _desiredOutput ?? SonyOutputState.Off;
+        }
+        TryWriteOutputNow(current with { LargeMotor = 0, SmallMotor = 0 });
         CloseStream(); // unblocks a pending Read
         _thread?.Join(500);
         _thread = null;
@@ -152,12 +193,11 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
                     }
                     catch (TimeoutException)
                     {
+                        SendPendingOutput();
                         continue;
                     }
 
-                    if (read <= 0) continue;
-
-                    if (TryParseReport(buffer.AsSpan(0, read), calibration, scratch, out var connection))
+                    if (read > 0 && TryParseReport(buffer.AsSpan(0, read), calibration, scratch, out var connection))
                     {
                         lock (_sync)
                         {
@@ -166,6 +206,8 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
                         }
                         Interlocked.Increment(ref _reportsReceived);
                     }
+
+                    SendPendingOutput();
                 }
             }
             catch (Exception) when (_running)
@@ -199,7 +241,21 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
             }
 
             opened.ReadTimeout = 250;
+            opened.WriteTimeout = 100;
             reportLength = Math.Max(found.GetMaxInputReportLength(), 64);
+
+            // Windows needs the write buffer to match the descriptor's output report length
+            _maxOutputReportLength = SafeGetMaxOutputLength(found);
+            lock (_writeLock)
+            {
+                _outputBuffer = new byte[Math.Max(_maxOutputReportLength, MaxSonyOutputReportLength)];
+                _outputSequence = 0;
+            }
+            lock (_outputSync)
+            {
+                _lastSentOutput = null; // the controller lost its state: re-send on reconnect
+                _firstOutputAfterConnect = true;
+            }
 
             // Reading the calibration feature report also switches Bluetooth controllers to the full report (with IMU)
             calibration = ReadCalibration(found, opened);
@@ -217,6 +273,73 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
         {
             CloseStream();
             return false;
+        }
+    }
+
+    private static int SafeGetMaxOutputLength(HidDevice device)
+    {
+        try { return device.GetMaxOutputReportLength(); }
+        catch { return 0; }
+    }
+
+    /// <summary>Reader thread: sends the desired state if it changed and the minimum gap has passed.</summary>
+    private void SendPendingOutput()
+    {
+        if (Connection == HidConnection.Unknown) return; // the report format depends on USB vs BT
+
+        SonyOutputState desired;
+        bool first;
+        lock (_outputSync)
+        {
+            if (_desiredOutput is not { } d || _lastSentOutput == d) return;
+            desired = d;
+            first = _firstOutputAfterConnect;
+        }
+
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (now - _lastOutputTimestamp < MinOutputIntervalTicks) return;
+
+        if (TryWriteOutputNow(desired, first))
+        {
+            _lastOutputTimestamp = now;
+            lock (_outputSync)
+            {
+                _lastSentOutput = desired;
+                _firstOutputAfterConnect = false;
+            }
+        }
+    }
+
+    private bool TryWriteOutputNow(in SonyOutputState state, bool firstAfterConnect = false)
+    {
+        HidStream? stream;
+        lock (_sync)
+        {
+            stream = _stream;
+        }
+        if (stream == null || Connection == HidConnection.Unknown || _maxOutputReportLength <= 0) return false;
+
+        lock (_writeLock)
+        {
+            try
+            {
+                var connection = Connection;
+                int length = BuildOutputReport(state, connection, ref _outputSequence, firstAfterConnect, _outputBuffer);
+
+                // Windows requires writing exactly the descriptor length. Over USB it can be shorter than the
+                // nominal report (DualSense USB: 48 bytes, the data fits); over BT the CRC sits at a fixed position,
+                // so never truncate there.
+                int writeLength = _maxOutputReportLength;
+                if (connection == HidConnection.Bluetooth && writeLength < length) writeLength = length;
+
+                stream.Write(_outputBuffer, 0, writeLength);
+                return true;
+            }
+            catch
+            {
+                // Timeout or disconnection: the read loop handles reconnecting
+                return false;
+            }
         }
     }
 

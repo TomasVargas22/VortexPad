@@ -41,3 +41,4 @@ Flujo por tick: `OnHighPrecisionTick` → `PollCurrentState` (snapshot, no bloqu
 - Formato de salida de `HidHideCLI --cloak-state` y `--dev-list` (se asume `--cloak-on`/`--cloak-off` y rutas entre comillas).
 - Instance IDs de HidHide con DualSense por Bluetooth; mandos Xbox por XInput pueden seguir visibles aunque se oculte su interfaz HID.
 - DualShock 4 por HID: layout de calibración del adaptador inalámbrico 0x0BA0 (se detecta por signos plus/minus), signos del giroscopio y que BT pase al reporte 0x11 tras leer el feature 0x05.
+- Vibración/LED (`Core/Hid/SonyOutputReports.cs`): DualSense usa a la vez `COMPATIBLE_VIBRATION` (flag0) y `COMPATIBLE_VIBRATION2` (flag2) para cubrir firmware viejo y nuevo; DS4 BT usa `0xC4` (HID + CRC + 4 ms). Comprobar que vibra y cambia de color por USB y BT, y que la longitud de escritura (`GetMaxOutputReportLength`) es aceptada por Windows.
