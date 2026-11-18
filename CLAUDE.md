@@ -7,7 +7,8 @@ La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
 ## Comandos
 
 - Compilar: `dotnet build .\VortexPad.sln`
-- Tests: `dotnet test .\VortexPad.sln`
+- Tests: `dotnet test .\VortexPad.sln` (CoreTests + WindowsTests)
+- CI: `.github/workflows/ci.yml` (windows-latest) compila en Release con `-warnaserror` y corre los tests en cada push y PR a `main`
 - Ejecutar: `dotnet run --project .\VortexPad.App\VortexPad.App.csproj -c Release`
 
 ## Arquitectura (`VortexPad.sln`)
@@ -17,10 +18,11 @@ La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
 | `VortexPad.Core` | net8.0 | Modelos (`Models/ControllerState.cs`), bucle de 1000 Hz (`Engine/HighPrecisionPollingLoop`), `Processing/SignalProcessor` + `GyroProcessor`, `Automation/MacroAndTurboEngine.ProcessFrame`, perfiles/presets + `ProfileRepository` (en `Profiles/BuiltInPresets.cs`), parsers HID puros en `Hid/`, log `Diagnostics/VortexLog` (rotativo, `ErrorThrottled` para rutas calientes), ajustes `Settings/AppSettings`, `Devices/DeviceSelectionPolicy` |
 | `VortexPad.AI` | net8.0 | `SmartMapperAndCalibrator`: identificación VID:PID, calibración de drift 3σ, tuning por género |
 | `VortexPad.Input` | net8.0-windows | `DirectInputAndHidProvider` (Vortice.DirectInput + HidSharp), `SonyHidReaderBase` (hilo propio con snapshot y reconexión) con `DualSenseHidReader` y `DualShock4HidReader`, `HidDeviceWatcher` (hot-plug), `ForegroundGameWatcher` |
-| `VortexPad.Emulation` | net8.0-windows | `ViGEmVirtualControllerService`, `NativeKeyboardMouseInjector`, `HidHideIntegrationService` |
+| `VortexPad.Emulation` | net8.0-windows | `ViGEmVirtualControllerService`, `NativeKeyboardMouseInjector` (con sumidero de test interno), `HidHideIntegrationService` (sobre `IHidHideCli`) |
 | `VortexPad.ViewModels` | net8.0 | MVVM (CommunityToolkit.Mvvm): `ProfileEditorViewModel` y sus secciones (sticks, gatillos, gyro, vibración, capas, turbos, macros). Editan el perfil en sitio, validan rangos y avisan con `ProfileEdited` |
 | `VortexPad.App` | net8.0-windows | WPF `MainWindow` (code-behind para motor, dispositivos y visualizador) + `Views/ProfileEditorView` (MVVM) + icono de bandeja |
 | `VortexPad.CoreTests` | net8.0 | xUnit; referencia Core, AI y ViewModels |
+| `VortexPad.WindowsTests` | net8.0-windows | xUnit para Input/Emulation con fakes (`FakeHidHideCli` simula el driver); accede a internos vía `InternalsVisibleTo` |
 
 Flujo por tick: `OnHighPrecisionTick` → `PollCurrentState` (snapshot, no bloquea) → `ProcessFrame` → `ViGEm.SubmitState` + `KmInjector.ApplyOutput`.
 

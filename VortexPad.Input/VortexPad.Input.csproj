@@ -16,4 +16,8 @@
     <ProjectReference Include="..\VortexPad.Core\VortexPad.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="VortexPad.WindowsTests" />
+  </ItemGroup>
+
 </Project>

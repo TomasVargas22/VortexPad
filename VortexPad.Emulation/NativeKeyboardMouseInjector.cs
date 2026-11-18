@@ -48,6 +48,40 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+    /// <summary>Already-translated event, used only by tests in place of SendInput.</summary>
+    internal readonly record struct InjectedInput(bool IsMouse, int Dx, int Dy, ushort VirtualKey, bool KeyUp);
+
+    private readonly Action<InjectedInput[]>? _testSink;
+
+    public NativeKeyboardMouseInjector()
+    {
+    }
+
+    /// <summary>Tests: captures what would be sent instead of calling SendInput.</summary>
+    internal NativeKeyboardMouseInjector(Action<InjectedInput[]> testSink)
+    {
+        _testSink = testSink;
+    }
+
+    private void Send(INPUT[] inputs, int count)
+    {
+        if (_testSink != null)
+        {
+            var captured = new InjectedInput[count];
+            for (int i = 0; i < count; i++)
+            {
+                var input = inputs[i];
+                captured[i] = input.type == INPUT_MOUSE
+                    ? new InjectedInput(true, input.U.mi.dx, input.U.mi.dy, 0, false)
+                    : new InjectedInput(false, 0, 0, input.U.ki.wVk, (input.U.ki.dwFlags & KEYEVENTF_KEYUP) != 0);
+            }
+            _testSink(captured);
+            return;
+        }
+
+        _ = SendInput((uint)count, inputs, InputSize);
+    }
+
     private readonly HashSet<ushort> _currentlyPressedKeys = new();
     private double _residualMouseX;
     private double _residualMouseY;
@@ -125,7 +159,7 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
         if (_inputCount > 0)
         {
             // SendInput only reads the first _inputCount entries of the array
-            _ = SendInput((uint)_inputCount, _inputBuffer, InputSize);
+            Send(_inputBuffer, _inputCount);
         }
     }
 
@@ -140,7 +174,7 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
 
         if (inputs.Length > 0)
         {
-            _ = SendInput((uint)inputs.Length, inputs, InputSize);
+            Send(inputs, inputs.Length);
         }
     }
 

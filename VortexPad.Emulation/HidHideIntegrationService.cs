@@ -16,50 +16,40 @@ namespace VortexPad.Emulation;
 /// </summary>
 public sealed class HidHideIntegrationService : IDisposable
 {
-    private const int CliTimeoutMs = 3000;
-
     private static readonly Regex QuotedValue = new("\"([^\"]+)\"", RegexOptions.Compiled);
 
-    private static readonly string SessionStatePath = Path.Combine(
+    private static readonly string DefaultSessionStatePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "VortexPad",
         "hidhide-session.json");
 
-    private readonly string? _cliPath;
+    private readonly IHidHideCli _cli;
+    private readonly string _sessionStatePath;
+    private readonly string? _appExePath;
     private readonly object _sync = new();
     private readonly List<string> _hiddenByUs = new();
     private bool _cloakEnabledByUs;
 
-    public bool IsHidHideInstalled => _cliPath != null;
+    public bool IsHidHideInstalled => _cli.IsAvailable;
     public bool IsDeviceCurrentlyCloaked { get; private set; }
     public string StatusText { get; private set; }
 
     public HidHideIntegrationService()
+        : this(new ProcessHidHideCli(), DefaultSessionStatePath, Environment.ProcessPath)
     {
-        _cliPath = FindCli();
-        StatusText = _cliPath != null
-            ? "HidHide detectado (Auto-Cloak listo)"
-            : "HidHide no instalado (Opcional: instala Nefarius.HidHide para ocultar mando físico)";
     }
 
-    private static string? FindCli()
+    /// <param name="cli">HidHideCLI executor (fake in tests).</param>
+    /// <param name="sessionStatePath">Session file for crash recovery.</param>
+    /// <param name="appExePath">Executable to whitelist; null = do not register any.</param>
+    public HidHideIntegrationService(IHidHideCli cli, string? sessionStatePath = null, string? appExePath = null)
     {
-        var roots = new[]
-        {
-            Environment.GetEnvironmentVariable("ProgramW6432"),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            @"C:\Program Files"
-        };
-
-        foreach (string? root in roots.Where(r => !string.IsNullOrWhiteSpace(r)).Distinct())
-        {
-            foreach (string sub in new[] { @"x64\HidHideCLI.exe", "HidHideCLI.exe" })
-            {
-                string candidate = Path.Combine(root!, "Nefarius Software Solutions", "HidHide", sub);
-                if (File.Exists(candidate)) return candidate;
-            }
-        }
-        return null;
+        _cli = cli ?? throw new ArgumentNullException(nameof(cli));
+        _sessionStatePath = sessionStatePath ?? DefaultSessionStatePath;
+        _appExePath = appExePath;
+        StatusText = _cli.IsAvailable
+            ? "HidHide detectado (Auto-Cloak listo)"
+            : "HidHide no instalado (Opcional: instala Nefarius.HidHide para ocultar mando físico)";
     }
 
     /// <summary>
@@ -70,11 +60,11 @@ public sealed class HidHideIntegrationService : IDisposable
     {
         lock (_sync)
         {
-            if (_cliPath == null || !File.Exists(SessionStatePath)) return;
+            if (!_cli.IsAvailable || !File.Exists(_sessionStatePath)) return;
 
             try
             {
-                var state = JsonSerializer.Deserialize<SessionState>(File.ReadAllText(SessionStatePath));
+                var state = JsonSerializer.Deserialize<SessionState>(File.ReadAllText(_sessionStatePath));
                 if (state != null)
                 {
                     _hiddenByUs.AddRange(state.HiddenByUs ?? new List<string>());
@@ -103,7 +93,7 @@ public sealed class HidHideIntegrationService : IDisposable
     {
         lock (_sync)
         {
-            if (_cliPath == null) return false;
+            if (!_cli.IsAvailable) return false;
 
             RestoreCore();
 
@@ -116,7 +106,7 @@ public sealed class HidHideIntegrationService : IDisposable
             try
             {
                 // Whitelist VortexPad itself so it can keep reading the controller once hidden
-                string? exePath = Environment.ProcessPath;
+                string? exePath = _appExePath;
                 if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
                 {
                     var reg = RunCli($"--app-reg \"{exePath}\"");
@@ -180,7 +170,7 @@ public sealed class HidHideIntegrationService : IDisposable
     {
         lock (_sync)
         {
-            if (_cliPath == null || !IsDeviceCurrentlyCloaked) return;
+            if (!_cli.IsAvailable || !IsDeviceCurrentlyCloaked) return;
             RestoreCore();
             StatusText = "HidHide: Mando físico visible (restaurado)";
         }
@@ -188,7 +178,7 @@ public sealed class HidHideIntegrationService : IDisposable
 
     private void RestoreCore()
     {
-        if (_cliPath != null)
+        if (_cli.IsAvailable)
         {
             foreach (string id in _hiddenByUs)
             {
@@ -226,41 +216,13 @@ public sealed class HidHideIntegrationService : IDisposable
         return set;
     }
 
-    private static string DescribeFailure(string action, CliResult result)
+    private static string DescribeFailure(string action, HidHideCliResult result)
     {
         string detail = string.IsNullOrWhiteSpace(result.Output) ? $"código {result.ExitCode}" : result.Output.Trim();
         return $"HidHide no pudo {action}: {detail}. ¿Ejecutaste VortexPad como administrador?";
     }
 
-    private readonly record struct CliResult(int ExitCode, string Output);
-
-    private CliResult RunCli(string arguments)
-    {
-        if (_cliPath == null) return new CliResult(-1, string.Empty);
-
-        using var proc = Process.Start(new ProcessStartInfo
-        {
-            FileName = _cliPath,
-            Arguments = arguments,
-            CreateNoWindow = true,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        });
-
-        if (proc == null) return new CliResult(-1, string.Empty);
-
-        var stdout = proc.StandardOutput.ReadToEndAsync();
-        var stderr = proc.StandardError.ReadToEndAsync();
-
-        if (!proc.WaitForExit(CliTimeoutMs))
-        {
-            try { proc.Kill(); } catch { }
-            return new CliResult(-1, "tiempo de espera agotado");
-        }
-
-        return new CliResult(proc.ExitCode, stdout.Result + stderr.Result);
-    }
+    private HidHideCliResult RunCli(string arguments) => _cli.Run(arguments);
 
     private sealed class SessionState
     {
@@ -272,8 +234,8 @@ public sealed class HidHideIntegrationService : IDisposable
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(SessionStatePath)!);
-            File.WriteAllText(SessionStatePath, JsonSerializer.Serialize(new SessionState
+            Directory.CreateDirectory(Path.GetDirectoryName(_sessionStatePath)!);
+            File.WriteAllText(_sessionStatePath, JsonSerializer.Serialize(new SessionState
             {
                 HiddenByUs = _hiddenByUs.ToList(),
                 CloakEnabledByUs = _cloakEnabledByUs
@@ -286,13 +248,13 @@ public sealed class HidHideIntegrationService : IDisposable
         }
     }
 
-    private static void DeleteSessionState()
+    private void DeleteSessionState()
     {
         try
         {
-            if (File.Exists(SessionStatePath)) File.Delete(SessionStatePath);
+            if (File.Exists(_sessionStatePath)) File.Delete(_sessionStatePath);
         }
-        catch { }
+        catch (Exception ex) { VortexLog.Warn("HidHide", "No se pudo borrar el archivo de sesión.", ex); }
     }
 
     public void Dispose()
