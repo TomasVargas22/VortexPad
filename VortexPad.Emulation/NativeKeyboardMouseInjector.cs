@@ -8,6 +8,11 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
     private const uint INPUT_MOUSE = 0;
     private const uint INPUT_KEYBOARD = 1;
     private const uint MOUSEEVENTF_MOVE = 0x0001;
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    private const uint MOUSEEVENTF_WHEEL = 0x0800;
     private const uint KEYEVENTF_KEYUP = 0x0002;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -49,7 +54,8 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     /// <summary>Already-translated event, used only by tests in place of SendInput.</summary>
-    internal readonly record struct InjectedInput(bool IsMouse, int Dx, int Dy, ushort VirtualKey, bool KeyUp);
+    internal readonly record struct InjectedInput(
+        bool IsMouse, int Dx, int Dy, ushort VirtualKey, bool KeyUp, uint MouseFlags = 0, int WheelData = 0);
 
     private readonly Action<InjectedInput[]>? _testSink;
 
@@ -72,7 +78,8 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
             {
                 var input = inputs[i];
                 captured[i] = input.type == INPUT_MOUSE
-                    ? new InjectedInput(true, input.U.mi.dx, input.U.mi.dy, 0, false)
+                    ? new InjectedInput(true, input.U.mi.dx, input.U.mi.dy, 0, false,
+                        input.U.mi.dwFlags & ~MOUSEEVENTF_MOVE, unchecked((int)input.U.mi.mouseData))
                     : new InjectedInput(false, 0, 0, input.U.ki.wVk, (input.U.ki.dwFlags & KEYEVENTF_KEYUP) != 0);
             }
             _testSink(captured);
@@ -85,6 +92,9 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
     private readonly HashSet<ushort> _currentlyPressedKeys = new();
     private double _residualMouseX;
     private double _residualMouseY;
+    private double _residualWheel;
+    private bool _leftButtonDown;
+    private bool _rightButtonDown;
 
     public bool Enabled { get; set; } = true;
 
@@ -135,6 +145,27 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
             });
         }
 
+        // 1b. Wheel (units of 1/120 notch; Windows accepts fractions of a notch for smooth scrolling)
+        double totalWheel = state.MouseWheelDelta + _residualWheel;
+        int wheel = (int)Math.Truncate(totalWheel);
+        _residualWheel = totalWheel - wheel;
+        if (wheel != 0)
+        {
+            AddInput(CreateMouseInput(MOUSEEVENTF_WHEEL, unchecked((uint)wheel)));
+        }
+
+        // 1c. Mouse buttons (touchpad as mouse): only the changes
+        if (state.MouseLeftButton != _leftButtonDown)
+        {
+            _leftButtonDown = state.MouseLeftButton;
+            AddInput(CreateMouseInput(_leftButtonDown ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP, 0));
+        }
+        if (state.MouseRightButton != _rightButtonDown)
+        {
+            _rightButtonDown = state.MouseRightButton;
+            AddInput(CreateMouseInput(_rightButtonDown ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP, 0));
+        }
+
         // 2. Virtual key state diffing
         foreach (ushort vk in state.ActiveVirtualKeys)
         {
@@ -163,20 +194,30 @@ public sealed class NativeKeyboardMouseInjector : IDisposable
         }
     }
 
+    /// <summary>Releases every pressed key and mouse button (on stopping emulation or closing).</summary>
     public void ReleaseAllKeys()
     {
-        if (_currentlyPressedKeys.Count == 0) return;
-
         var inputs = _currentlyPressedKeys
             .Select(vk => CreateKeyInput(vk, keyUp: true))
-            .ToArray();
+            .ToList();
         _currentlyPressedKeys.Clear();
 
-        if (inputs.Length > 0)
+        if (_leftButtonDown) inputs.Add(CreateMouseInput(MOUSEEVENTF_LEFTUP, 0));
+        if (_rightButtonDown) inputs.Add(CreateMouseInput(MOUSEEVENTF_RIGHTUP, 0));
+        _leftButtonDown = _rightButtonDown = false;
+        _residualWheel = 0;
+
+        if (inputs.Count > 0)
         {
-            Send(inputs, inputs.Length);
+            Send(inputs.ToArray(), inputs.Count);
         }
     }
+
+    private static INPUT CreateMouseInput(uint flags, uint mouseData) => new()
+    {
+        type = INPUT_MOUSE,
+        U = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags, mouseData = mouseData } }
+    };
 
     private static INPUT CreateKeyInput(ushort vk, bool keyUp)
     {

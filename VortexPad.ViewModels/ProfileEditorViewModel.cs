@@ -46,6 +46,9 @@ public sealed class ProfileEditorViewModel : EditableViewModel
     public TriggerViewModel RightTrigger { get; private set; } = null!;
     public GyroViewModel Gyro { get; private set; } = null!;
     public ForceFeedbackViewModel ForceFeedback { get; private set; } = null!;
+    public TouchpadViewModel Touchpad { get; private set; } = null!;
+    public AdaptiveTriggerViewModel LeftAdaptiveTrigger { get; private set; } = null!;
+    public AdaptiveTriggerViewModel RightAdaptiveTrigger { get; private set; } = null!;
     public MappingLayerViewModel BaseLayer { get; private set; } = null!;
     public ObservableCollection<MappingLayerViewModel> ShiftLayers { get; } = new();
     public ObservableCollection<TurboViewModel> Turbos { get; } = new();
@@ -175,6 +178,12 @@ public sealed class ProfileEditorViewModel : EditableViewModel
         RightTrigger = new TriggerViewModel(profile.RightTrigger, "Gatillo derecho (RT / R2)", NotifyEdited);
         Gyro = new GyroViewModel(profile.Gyro, NotifyEdited);
         ForceFeedback = new ForceFeedbackViewModel(profile.ForceFeedback, NotifyEdited);
+        profile.Touchpad ??= new TouchpadConfiguration();
+        profile.LeftAdaptiveTrigger ??= new AdaptiveTriggerConfiguration();
+        profile.RightAdaptiveTrigger ??= new AdaptiveTriggerConfiguration();
+        Touchpad = new TouchpadViewModel(profile.Touchpad, NotifyEdited);
+        LeftAdaptiveTrigger = new AdaptiveTriggerViewModel(profile.LeftAdaptiveTrigger, "Gatillo adaptativo L2", NotifyEdited);
+        RightAdaptiveTrigger = new AdaptiveTriggerViewModel(profile.RightAdaptiveTrigger, "Gatillo adaptativo R2", NotifyEdited);
         BaseLayer = new MappingLayerViewModel(profile.BaseLayer, isBaseLayer: true, NotifyEdited);
 
         ShiftLayers.Clear();

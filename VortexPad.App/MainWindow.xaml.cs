@@ -7,6 +7,7 @@ using VortexPad.Core.Automation;
 using VortexPad.Core.Devices;
 using VortexPad.Core.Diagnostics;
 using VortexPad.Core.Engine;
+using VortexPad.Core.Hid;
 using VortexPad.Core.Models;
 using VortexPad.Core.Processing;
 using VortexPad.Core.Profiles;
@@ -51,7 +52,11 @@ public partial class MainWindow : Window
 
     // Physical controller output (vibration + LED). ViGEm fires feedback on its own thread, so it reads
     // an immutable copy of the profile settings published from the UI thread.
-    private sealed record FeedbackSettings(ForceFeedbackConfiguration Config, string LightbarHex);
+    private sealed record FeedbackSettings(
+        ForceFeedbackConfiguration Config,
+        string LightbarHex,
+        AdaptiveTriggerEffect LeftTrigger = default,
+        AdaptiveTriggerEffect RightTrigger = default);
     private volatile FeedbackSettings _feedbackSettings = new(new ForceFeedbackConfiguration(), "#00E5FF");
     private volatile ForceFeedbackState? _lastGameFeedback;
     private bool _suppressUiEvents;
@@ -366,18 +371,13 @@ public partial class MainWindow : Window
         PublishRuntimeProfile();
         RefreshProfileHeader();
 
+        // Vibration, LED and adaptive triggers: cheap, and the reader only resends if the result changed
+        PublishFeedbackSettings();
+
         switch (what)
         {
             case nameof(ProfileEditorViewModel.Name):
                 LstProfiles.Items.Refresh();
-                break;
-
-            case nameof(ProfileEditorViewModel.LightbarHex):
-            case "Enabled":
-            case "OverallStrength":
-            case "LargeMotorGain":
-            case "SmallMotorGain":
-                PublishFeedbackSettings();
                 break;
 
             case nameof(ProfileEditorViewModel.TargetControllerType):
@@ -420,7 +420,9 @@ public partial class MainWindow : Window
                 LargeMotorGain = ff.LargeMotorGain,
                 SmallMotorGain = ff.SmallMotorGain
             },
-            _activeProfile.LightbarHex);
+            _activeProfile.LightbarHex,
+            AdaptiveTriggerEffect.FromConfig(_activeProfile.LeftAdaptiveTrigger),
+            AdaptiveTriggerEffect.FromConfig(_activeProfile.RightAdaptiveTrigger));
         PushPhysicalOutput();
     }
 
@@ -431,7 +433,9 @@ public partial class MainWindow : Window
     private void PushPhysicalOutput(ForceFeedbackState? overrideFeedback = null)
     {
         var settings = _feedbackSettings;
-        var output = ForceFeedbackMixer.Compute(overrideFeedback ?? _lastGameFeedback, settings.Config, settings.LightbarHex);
+        var output = ForceFeedbackMixer.Compute(
+            overrideFeedback ?? _lastGameFeedback, settings.Config, settings.LightbarHex,
+            settings.LeftTrigger, settings.RightTrigger);
         _inputProvider.SetOutput(output);
     }
 

@@ -18,6 +18,7 @@ public sealed class MacroAndTurboEngine
     private readonly Dictionary<string, ActiveMacroExecution> _activeMacros = new();
     private readonly HashSet<string> _prevMacroTriggers = new();
     private readonly GyroProcessor _gyroProcessor = new();
+    private readonly TouchpadProcessor _touchpad = new();
     private readonly List<string> _finishedMacroIds = new();
 
     // Enum.GetValues allocates an array on every call: compute it once
@@ -51,6 +52,7 @@ public sealed class MacroAndTurboEngine
         _activeMacros.Clear();
         _prevMacroTriggers.Clear();
         _gyroProcessor.Reset();
+        _touchpad.Reset();
         while (_queuedMacros.TryDequeue(out _)) { }
         _cancelMacrosRequested = false;
         InvalidateProfileCache();
@@ -99,6 +101,7 @@ public sealed class MacroAndTurboEngine
         {
             _activeMacros.Clear();
             _turboPhaseSeconds.Clear();
+            _touchpad.Reset();
         }
         _cachedProfileId = profile.Id;
 
@@ -232,11 +235,25 @@ public sealed class MacroAndTurboEngine
         output.L2 = l2;
         output.R2 = r2;
 
+        // 4b. DualSense touchpad: mouse / scroll / click zones
+        var touch = _touchpad.Process(physical, profile.Touchpad);
+        output.MouseDeltaX += touch.MouseDx;
+        output.MouseDeltaY += touch.MouseDy;
+        output.MouseWheelDelta += touch.Wheel;
+        output.MouseLeftButton |= touch.MouseLeft;
+        output.MouseRightButton |= touch.MouseRight;
+
         // 5. Process buttons with Shift Remapping + Turbo
         foreach (ControllerButton rawBtn in AllButtons)
         {
             // Skip shift modifier button itself if it's currently activating a shift layer
             if (activeLayer.ShiftModifierButton.HasValue && rawBtn == activeLayer.ShiftModifierButton.Value)
+            {
+                continue;
+            }
+
+            // The touchpad click turned into mouse buttons or zones no longer goes out as the touchpad button
+            if (rawBtn == ControllerButton.TouchpadClick && touch.ConsumeTouchpadClick)
             {
                 continue;
             }
@@ -266,6 +283,11 @@ public sealed class MacroAndTurboEngine
             {
                 output.ActiveButtons.Add(mappedBtn);
             }
+        }
+
+        if (touch.ZoneButton != ControllerButton.None)
+        {
+            output.ActiveButtons.Add(touch.ZoneButton);
         }
 
         // 6. Advance and apply Macros

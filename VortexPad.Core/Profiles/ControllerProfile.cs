@@ -52,6 +52,57 @@ public sealed class ForceFeedbackConfiguration
     public double SmallMotorGain { get; set; } = 1.0;
 }
 
+public enum TouchpadMode
+{
+    /// <summary>Touch is ignored; the touchpad click goes out as the virtual controller's touchpad button.</summary>
+    Disabled,
+    /// <summary>One finger moves the mouse, two fingers scroll.</summary>
+    Mouse
+}
+
+/// <summary>DualSense touchpad: mouse, two-finger scroll and click zones.</summary>
+public sealed class TouchpadConfiguration
+{
+    public TouchpadMode Mode { get; set; } = TouchpadMode.Disabled;
+
+    /// <summary>Pixels per full touchpad width × this factor (1.0 ≈ 1000 px).</summary>
+    public double MouseSensitivity { get; set; } = 1.0;
+
+    public bool TwoFingerScroll { get; set; } = true;
+
+    /// <summary>1.0 ≈ 10 wheel notches for a full touchpad height.</summary>
+    public double ScrollSensitivity { get; set; } = 1.0;
+
+    public bool InvertScroll { get; set; }
+
+    /// <summary>
+    /// Splits the click into two halves: the left half presses <see cref="LeftZoneButton"/> and the right half
+    /// <see cref="RightZoneButton"/>, instead of the normal touchpad button.
+    /// </summary>
+    public bool SplitClickZones { get; set; }
+
+    public ControllerButton LeftZoneButton { get; set; } = ControllerButton.Back;
+    public ControllerButton RightZoneButton { get; set; } = ControllerButton.Start;
+
+    /// <summary>In mouse mode: left half = left click, right half = right click (takes priority over the zones).</summary>
+    public bool ClickAsMouseButtons { get; set; } = true;
+}
+
+/// <summary>
+/// DualSense adaptive trigger effect (positions 0–9 along the travel, strength 1–8).
+/// - Resistance: constant resistance from <see cref="StartPosition"/> to the end.
+/// - Weapon: "trigger" type click between <see cref="StartPosition"/> and <see cref="EndPosition"/>.
+/// - Vibration: vibrates from <see cref="StartPosition"/> at <see cref="FrequencyHz"/>.
+/// </summary>
+public sealed class AdaptiveTriggerConfiguration
+{
+    public AdaptiveTriggerMode Mode { get; set; } = AdaptiveTriggerMode.Off;
+    public int StartPosition { get; set; } = 2;
+    public int EndPosition { get; set; } = 6;
+    public int Strength { get; set; } = 5;
+    public int FrequencyHz { get; set; } = 30;
+}
+
 public sealed class TurboButtonConfig
 {
     public ControllerButton Button { get; set; }
@@ -118,6 +169,11 @@ public sealed class ControllerProfile
     public TriggerConfiguration RightTrigger { get; set; } = new();
     public GyroConfiguration Gyro { get; set; } = new();
     public ForceFeedbackConfiguration ForceFeedback { get; set; } = new();
+
+    // DualSense extras (Phase 8). Missing in old JSON → default values (off).
+    public TouchpadConfiguration Touchpad { get; set; } = new();
+    public AdaptiveTriggerConfiguration LeftAdaptiveTrigger { get; set; } = new();
+    public AdaptiveTriggerConfiguration RightAdaptiveTrigger { get; set; } = new();
 
     public MappingLayer BaseLayer { get; set; } = new();
     public List<MappingLayer> ShiftLayers { get; set; } = new();

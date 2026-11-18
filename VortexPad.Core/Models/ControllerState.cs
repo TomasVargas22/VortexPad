@@ -30,6 +30,15 @@ public enum GyroOutputMode
     MouseDelta
 }
 
+/// <summary>DualSense adaptive trigger effect.</summary>
+public enum AdaptiveTriggerMode
+{
+    Off,
+    Resistance,
+    Weapon,
+    Vibration
+}
+
 public enum GyroActivationMode
 {
     AlwaysOn,
@@ -58,8 +67,18 @@ public enum ControllerButton
     DPadLeft = 15,
     DPadRight = 16,
     Paddle1 = 17,
-    Paddle2 = 18
+    Paddle2 = 18,
+    // Added in Phase 8 at the end, with explicit values: profiles store buttons by name, so existing JSON still works
+    Mute = 19,     // DualSense mic mute button
+    FnLeft = 20,   // DualSense Edge left Fn
+    FnRight = 21   // DualSense Edge right Fn
 }
+
+/// <summary>
+/// One finger on the touchpad. X and Y normalized to [0, 1] (0,0 = top-left corner).
+/// <see cref="Id"/> changes every time the finger is lifted and put down again.
+/// </summary>
+public readonly record struct TouchPoint(bool Active, byte Id, double X, double Y);
 
 public sealed class PhysicalInputState
 {
@@ -88,6 +107,10 @@ public sealed class PhysicalInputState
     public double AccelY { get; set; }
     public double AccelZ { get; set; }
 
+    // Touchpad (DualSense): up to two fingers
+    public TouchPoint Touch1 { get; set; }
+    public TouchPoint Touch2 { get; set; }
+
     // Buttons pressed
     public HashSet<ControllerButton> PressedButtons { get; set; } = new();
 
@@ -115,6 +138,8 @@ public sealed class PhysicalInputState
             AccelX = AccelX,
             AccelY = AccelY,
             AccelZ = AccelZ,
+            Touch1 = Touch1,
+            Touch2 = Touch2,
             PressedButtons = new HashSet<ControllerButton>(PressedButtons),
             TimestampTicks = TimestampTicks
         };
@@ -142,6 +167,11 @@ public sealed class VirtualOutputState
     public double MouseDeltaX { get; set; }
     public double MouseDeltaY { get; set; }
 
+    // Mouse wheel (units of 1/120 notch; positive = up) and buttons (touchpad as mouse)
+    public double MouseWheelDelta { get; set; }
+    public bool MouseLeftButton { get; set; }
+    public bool MouseRightButton { get; set; }
+
     // Active Windows Virtual Key codes (VK_*)
     public HashSet<ushort> ActiveVirtualKeys { get; set; } = new();
 
@@ -159,6 +189,8 @@ public sealed class VirtualOutputState
         LX = LY = RX = RY = 0;
         L2 = R2 = 0;
         MouseDeltaX = MouseDeltaY = 0;
+        MouseWheelDelta = 0;
+        MouseLeftButton = MouseRightButton = false;
         ActiveButtons.Clear();
         ActiveVirtualKeys.Clear();
     }
@@ -175,6 +207,9 @@ public sealed class VirtualOutputState
         R2 = other.R2;
         MouseDeltaX = other.MouseDeltaX;
         MouseDeltaY = other.MouseDeltaY;
+        MouseWheelDelta = other.MouseWheelDelta;
+        MouseLeftButton = other.MouseLeftButton;
+        MouseRightButton = other.MouseRightButton;
         LightbarR = other.LightbarR;
         LightbarG = other.LightbarG;
         LightbarB = other.LightbarB;

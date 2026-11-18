@@ -61,7 +61,12 @@ public static class DualSenseReportParser
     private const int OffLX = 0, OffLY = 1, OffRX = 2, OffRY = 3, OffL2 = 4, OffR2 = 5;
     private const int OffButtons0 = 7, OffButtons1 = 8, OffButtons2 = 9;
     private const int OffGyro = 15, OffAccel = 21;
+    private const int OffTouch = 32; // two points of 4 bytes
     private const int MinDataLength = OffAccel + 6; // up to and including the accelerometer
+
+    // Touchpad resolution (12-bit coordinates)
+    public const int TouchpadWidth = 1920;
+    public const int TouchpadHeight = 1080;
 
     public static bool IsDualSense(int vendorId, int productId) =>
         vendorId == SonyVendorId && productId is DualSenseProductId or DualSenseEdgeProductId;
@@ -108,10 +113,25 @@ public static class DualSenseReportParser
         byte b2 = d[OffButtons2];
         var buttons = state.PressedButtons;
         DecodeButtons(d[OffButtons0], d[OffButtons1], b2, buttons);
-        // b2: 0x04 = Mute (no equivalent in ControllerButton)
-        // DualSense Edge: 0x40 / 0x80 = left / right back paddle
+        if ((b2 & 0x04) != 0) buttons.Add(ControllerButton.Mute);
+        // DualSense Edge: 0x10 / 0x20 = left / right Fn, 0x40 / 0x80 = left / right back paddle
+        if ((b2 & 0x10) != 0) buttons.Add(ControllerButton.FnLeft);
+        if ((b2 & 0x20) != 0) buttons.Add(ControllerButton.FnRight);
         if ((b2 & 0x40) != 0) buttons.Add(ControllerButton.Paddle1);
         if ((b2 & 0x80) != 0) buttons.Add(ControllerButton.Paddle2);
+
+        // Touchpad: two points of 4 bytes. Byte 0: bit 7 = NOT touching, bits 0-6 = contact id;
+        // X = 12 bits (byte1 | low nibble of byte2 << 8), Y = 12 bits (high nibble of byte2 | byte3 << 4)
+        if (d.Length >= OffTouch + 8)
+        {
+            state.Touch1 = DecodeTouch(d.Slice(OffTouch, 4));
+            state.Touch2 = DecodeTouch(d.Slice(OffTouch + 4, 4));
+        }
+        else
+        {
+            state.Touch1 = default;
+            state.Touch2 = default;
+        }
 
         // IMU: gyro (pitch, yaw, roll) and accelerometer (X, Y, Z), little-endian int16
         state.GyroPitch = calibration.GyroToDegSec(0, ReadInt16(d, OffGyro));
@@ -122,5 +142,19 @@ public static class DualSenseReportParser
         state.AccelZ = calibration.AccelToG(2, ReadInt16(d, OffAccel + 4));
 
         return true;
+    }
+
+    private static TouchPoint DecodeTouch(ReadOnlySpan<byte> p)
+    {
+        bool active = (p[0] & 0x80) == 0;
+        if (!active) return default;
+
+        int x = p[1] | ((p[2] & 0x0F) << 8);
+        int y = (p[2] >> 4) | (p[3] << 4);
+        return new TouchPoint(
+            true,
+            (byte)(p[0] & 0x7F),
+            Math.Clamp(x / (double)(TouchpadWidth - 1), 0.0, 1.0),
+            Math.Clamp(y / (double)(TouchpadHeight - 1), 0.0, 1.0));
     }
 }

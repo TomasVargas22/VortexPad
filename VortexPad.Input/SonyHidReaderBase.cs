@@ -370,6 +370,8 @@ public abstract class SonyHidReaderBase<TCalibration> : IDisposable
         to.AccelX = from.AccelX;
         to.AccelY = from.AccelY;
         to.AccelZ = from.AccelZ;
+        to.Touch1 = from.Touch1;
+        to.Touch2 = from.Touch2;
         to.PressedButtons.Clear();
         to.PressedButtons.UnionWith(from.PressedButtons);
     }

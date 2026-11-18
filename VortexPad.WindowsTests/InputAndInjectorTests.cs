@@ -166,3 +166,45 @@ public class ViGEmServiceWithoutDriverTests
         Assert.False(service.IsControllerConnected);
     }
 }
+
+public class MouseWheelAndButtonsInjectionTests
+{
+    private const uint LeftDown = 0x0002, LeftUp = 0x0004, RightDown = 0x0008, Wheel = 0x0800;
+
+    [Fact]
+    public void Wheel_AccumulatesFractions_AndButtonsSendOnlyChanges()
+    {
+        var batches = new List<Injected[]>();
+        var injector = new NativeKeyboardMouseInjector(batches.Add);
+
+        injector.ApplyOutput(new VirtualOutputState { MouseWheelDelta = 0.6 });  // < 1 unit: nothing
+        injector.ApplyOutput(new VirtualOutputState { MouseWheelDelta = 0.6, MouseLeftButton = true });
+        injector.ApplyOutput(new VirtualOutputState { MouseLeftButton = true }); // no change
+        injector.ApplyOutput(new VirtualOutputState { MouseRightButton = true });
+
+        Assert.Equal(2, batches.Count);
+        Assert.Equal(new[]
+        {
+            new Injected(true, 0, 0, 0, false, Wheel, 1),
+            new Injected(true, 0, 0, 0, false, LeftDown, 0)
+        }, batches[0]);
+        Assert.Equal(new[]
+        {
+            new Injected(true, 0, 0, 0, false, LeftUp, 0),
+            new Injected(true, 0, 0, 0, false, RightDown, 0)
+        }, batches[1]);
+    }
+
+    [Fact]
+    public void ReleaseAllKeys_AlsoReleasesMouseButtons()
+    {
+        var batches = new List<Injected[]>();
+        var injector = new NativeKeyboardMouseInjector(batches.Add);
+        injector.ApplyOutput(new VirtualOutputState { MouseLeftButton = true, MouseRightButton = true });
+        batches.Clear();
+
+        injector.ReleaseAllKeys();
+
+        Assert.Equal(new uint[] { LeftUp, 0x0010 }, batches.Single().Select(i => i.MouseFlags));
+    }
+}

@@ -2,14 +2,19 @@ using System.Buffers.Binary;
 
 namespace VortexPad.Core.Hid;
 
-/// <summary>What gets sent to the physical controller: motors, lightbar and player LEDs.</summary>
+/// <summary>
+/// What gets sent to the physical controller: motors, lightbar, player LEDs and (DualSense only)
+/// adaptive triggers. The DualShock 4 ignores the triggers.
+/// </summary>
 public readonly record struct SonyOutputState(
     byte LargeMotor,
     byte SmallMotor,
     byte LedR,
     byte LedG,
     byte LedB,
-    byte PlayerLeds = DualSenseOutputReport.PlayerLedsOne)
+    byte PlayerLeds = DualSenseOutputReport.PlayerLedsOne,
+    AdaptiveTriggerEffect LeftTrigger = default,
+    AdaptiveTriggerEffect RightTrigger = default)
 {
     public static SonyOutputState Off { get; } = new(0, 0, 0, 0, 0, 0);
 }
@@ -76,6 +81,8 @@ public static class DualSenseOutputReport
     // valid_flag0
     private const byte Flag0CompatibleVibration = 0x01;
     private const byte Flag0HapticsSelect = 0x02;
+    private const byte Flag0RightTriggerEffect = 0x04;
+    private const byte Flag0LeftTriggerEffect = 0x08;
     // valid_flag1
     private const byte Flag1LightbarControl = 0x04;
     private const byte Flag1PlayerIndicatorControl = 0x10;
@@ -86,6 +93,7 @@ public static class DualSenseOutputReport
 
     // Offsets inside the common block
     private const int OffFlag0 = 0, OffFlag1 = 1, OffMotorRight = 2, OffMotorLeft = 3;
+    private const int OffRightTrigger = 10, OffLeftTrigger = 21; // 11 bytes each
     private const int OffFlag2 = 38, OffLightbarSetup = 41, OffPlayerLeds = 43;
     private const int OffLedR = 44, OffLedG = 45, OffLedB = 46;
 
@@ -118,7 +126,10 @@ public static class DualSenseOutputReport
             c = 1;
         }
 
-        report[c + OffFlag0] = Flag0CompatibleVibration | Flag0HapticsSelect;
+        // The triggers are always sent (Off included) so that a profile without effects releases what another one left behind
+        report[c + OffFlag0] = Flag0CompatibleVibration | Flag0HapticsSelect | Flag0RightTriggerEffect | Flag0LeftTriggerEffect;
+        AdaptiveTriggerEncoder.Encode(state.RightTrigger, report.Slice(c + OffRightTrigger, AdaptiveTriggerEncoder.EffectLength));
+        AdaptiveTriggerEncoder.Encode(state.LeftTrigger, report.Slice(c + OffLeftTrigger, AdaptiveTriggerEncoder.EffectLength));
         report[c + OffFlag1] = Flag1LightbarControl | Flag1PlayerIndicatorControl;
         report[c + OffFlag2] = Flag2CompatibleVibration2;
         if (releaseStartupLights)

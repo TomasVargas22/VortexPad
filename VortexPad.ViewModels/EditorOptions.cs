@@ -74,12 +74,29 @@ public static class EditorOptions
         new EnumOption<ControllerButton>(ControllerButton.DPadLeft, "D-Pad ←"),
         new EnumOption<ControllerButton>(ControllerButton.DPadRight, "D-Pad →"),
         new EnumOption<ControllerButton>(ControllerButton.Paddle1, "Paleta 1"),
-        new EnumOption<ControllerButton>(ControllerButton.Paddle2, "Paleta 2")
+        new EnumOption<ControllerButton>(ControllerButton.Paddle2, "Paleta 2"),
+        new EnumOption<ControllerButton>(ControllerButton.Mute, "Mute (DualSense)"),
+        new EnumOption<ControllerButton>(ControllerButton.FnLeft, "Fn izquierdo (Edge)"),
+        new EnumOption<ControllerButton>(ControllerButton.FnRight, "Fn derecho (Edge)")
     };
 
     /// <summary>Real buttons only (no "(ninguno)"), for things that require one.</summary>
     public static IReadOnlyList<EnumOption<ControllerButton>> RealButtons { get; } =
         Buttons.Where(b => b.Value != ControllerButton.None).ToArray();
+
+    public static IReadOnlyList<EnumOption<TouchpadMode>> TouchpadModes { get; } = new[]
+    {
+        new EnumOption<TouchpadMode>(TouchpadMode.Disabled, "Desactivado (botón touchpad normal)"),
+        new EnumOption<TouchpadMode>(TouchpadMode.Mouse, "Ratón (1 dedo mueve, 2 dedos scroll)")
+    };
+
+    public static IReadOnlyList<EnumOption<AdaptiveTriggerMode>> AdaptiveTriggerModes { get; } = new[]
+    {
+        new EnumOption<AdaptiveTriggerMode>(AdaptiveTriggerMode.Off, "Sin efecto"),
+        new EnumOption<AdaptiveTriggerMode>(AdaptiveTriggerMode.Resistance, "Resistencia continua"),
+        new EnumOption<AdaptiveTriggerMode>(AdaptiveTriggerMode.Weapon, "Arma (clic de gatillo)"),
+        new EnumOption<AdaptiveTriggerMode>(AdaptiveTriggerMode.Vibration, "Vibración")
+    };
 
     public static IReadOnlyList<EnumOption<int>> PollingRates { get; } = new[]
     {

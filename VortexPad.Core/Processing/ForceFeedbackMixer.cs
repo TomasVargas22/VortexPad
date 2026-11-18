@@ -14,10 +14,14 @@ public static class ForceFeedbackMixer
     /// <param name="feedback">Latest vibration/LED from ViGEm, or null if the game has sent nothing yet.</param>
     /// <param name="config">Gains of the active profile.</param>
     /// <param name="profileLightbarHex">Profile color, used when the game does not control the lightbar.</param>
+    /// <param name="leftTrigger">Profile adaptive effect for L2 (DualSense).</param>
+    /// <param name="rightTrigger">Profile adaptive effect for R2 (DualSense).</param>
     public static SonyOutputState Compute(
         ForceFeedbackState? feedback,
         ForceFeedbackConfiguration config,
-        string? profileLightbarHex)
+        string? profileLightbarHex,
+        AdaptiveTriggerEffect leftTrigger = default,
+        AdaptiveTriggerEffect rightTrigger = default)
     {
         byte large = 0, small = 0;
         if (feedback != null && config.Enabled)
@@ -39,7 +43,8 @@ public static class ForceFeedbackMixer
             ParseHexColor(profileLightbarHex, out r, out g, out b);
         }
 
-        return new SonyOutputState(large, small, r, g, b);
+        return new SonyOutputState(large, small, r, g, b,
+            LeftTrigger: leftTrigger, RightTrigger: rightTrigger);
     }
 
     private static byte ToByte(double normalized) =>

@@ -130,6 +130,29 @@
             </Border>
         </DataTemplate>
 
+        <!-- ===== Adaptive trigger (DualSense) ===== -->
+        <DataTemplate DataType="{x:Type vm:AdaptiveTriggerViewModel}">
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitle}" Margin="0,0,0,6"/>
+                    <ComboBox ItemsSource="{x:Static vm:EditorOptions.AdaptiveTriggerModes}" SelectedValuePath="Value"
+                              SelectedValue="{Binding Mode}"/>
+                    <StackPanel Visibility="{Binding IsEnabled, Converter={StaticResource BoolToVis}}">
+                        <views:LabeledSlider Label="Posición de inicio (0 = suelto, 9 = fondo)" Format="{}{0:F0}" Minimum="0" Maximum="9" Step="1"
+                                             Value="{Binding StartPosition}"/>
+                        <views:LabeledSlider Label="Posición final del clic" Format="{}{0:F0}" Minimum="3" Maximum="8" Step="1"
+                                             Value="{Binding EndPosition}"
+                                             Visibility="{Binding UsesEnd, Converter={StaticResource BoolToVis}}"/>
+                        <views:LabeledSlider Label="Fuerza" Format="{}{0:F0} / 8" Minimum="1" Maximum="8" Step="1"
+                                             Value="{Binding Strength}"/>
+                        <views:LabeledSlider Label="Frecuencia de vibración" Format="{}{0:F0} Hz" Minimum="1" Maximum="255" Step="1"
+                                             Value="{Binding FrequencyHz}"
+                                             Visibility="{Binding UsesFrequency, Converter={StaticResource BoolToVis}}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
         <!-- ===== Mapping layer ===== -->
         <DataTemplate DataType="{x:Type vm:MappingLayerViewModel}">
             <StackPanel>
@@ -422,6 +445,51 @@
                                         Command="{Binding AddStepCommand}"/>
                             </StackPanel>
                         </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ===== DualSense: touchpad + adaptive triggers ===== -->
+            <TabItem Header="DualSense">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="Solo para DualSense / Edge leído por HID nativo." Foreground="#94A3B8" FontSize="11"
+                                   TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel DataContext="{Binding Touchpad}">
+                                <TextBlock Text="TOUCHPAD" Style="{StaticResource SectionTitle}" Margin="0,0,0,6"/>
+                                <ComboBox ItemsSource="{x:Static vm:EditorOptions.TouchpadModes}" SelectedValuePath="Value"
+                                          SelectedValue="{Binding Mode}"/>
+                                <StackPanel Visibility="{Binding IsMouseMode, Converter={StaticResource BoolToVis}}">
+                                    <views:LabeledSlider Label="Sensibilidad del ratón" Format="{}{0:F1}x" Minimum="0.1" Maximum="5" Step="0.1"
+                                                         Value="{Binding MouseSensitivity}"/>
+                                    <CheckBox Content="Scroll con dos dedos" IsChecked="{Binding TwoFingerScroll}"/>
+                                    <views:LabeledSlider Label="Velocidad del scroll" Format="{}{0:F1}x" Minimum="0.1" Maximum="5" Step="0.1"
+                                                         Value="{Binding ScrollSensitivity}"
+                                                         Visibility="{Binding TwoFingerScroll, Converter={StaticResource BoolToVis}}"/>
+                                    <CheckBox Content="Invertir dirección del scroll" IsChecked="{Binding InvertScroll}"
+                                              Visibility="{Binding TwoFingerScroll, Converter={StaticResource BoolToVis}}"/>
+                                    <CheckBox Content="Clic: mitad izquierda = clic izquierdo, derecha = clic derecho"
+                                              IsChecked="{Binding ClickAsMouseButtons}"/>
+                                </StackPanel>
+                                <CheckBox Content="Dividir el clic del touchpad en dos zonas" IsChecked="{Binding SplitClickZones}"/>
+                                <StackPanel Visibility="{Binding UsesZones, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="Zona izquierda pulsa:" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox ItemsSource="{x:Static vm:EditorOptions.Buttons}" SelectedValuePath="Value"
+                                              SelectedValue="{Binding LeftZoneButton}"/>
+                                    <TextBlock Text="Zona derecha pulsa:" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox ItemsSource="{x:Static vm:EditorOptions.Buttons}" SelectedValuePath="Value"
+                                              SelectedValue="{Binding RightZoneButton}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <ContentControl Content="{Binding LeftAdaptiveTrigger}"/>
+                        <ContentControl Content="{Binding RightAdaptiveTrigger}"/>
+
+                        <TextBlock Text="Mute y los botones Fn del Edge se pueden remapear en la pestaña Capas."
+                                   Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

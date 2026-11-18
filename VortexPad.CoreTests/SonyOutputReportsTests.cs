@@ -28,7 +28,7 @@ public class SonyOutputReportsTests
 
         Assert.Equal(DualSenseOutputReport.UsbLength, len);
         Assert.Equal(0x02, buffer[0]);
-        Assert.Equal(0x03, buffer[1]);          // compatible vibration + haptics select
+        Assert.Equal(0x0F, buffer[1]);          // compatible vibration + haptics select + both trigger effects
         Assert.Equal(0x14, buffer[2]);          // lightbar + player LEDs
         Assert.Equal(50, buffer[3]);            // right motor = small
         Assert.Equal(200, buffer[4]);           // left motor = large
