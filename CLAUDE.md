@@ -10,6 +10,10 @@ La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
 - Tests: `dotnet test .\VortexPad.sln` (CoreTests + WindowsTests)
 - CI: `.github/workflows/ci.yml` (windows-latest) compila en Release con `-warnaserror` y corre los tests en cada push y PR a `main`
 - Ejecutar: `dotnet run --project .\VortexPad.App\VortexPad.App.csproj -c Release`
+- Publicar exe (self-contained, single-file, win-x64): `dotnet publish .\VortexPad.App\VortexPad.App.csproj -c Release -r win-x64 -o publish`
+- Instalador local (requiere Inno Setup 6): `iscc /DAppVersion=0.1.0 /DPublishDir=..\publish installer\VortexPad.iss` → `dist\`
+- Release: `git tag vX.Y.Z` + `git push origin vX.Y.Z` → `.github/workflows/release.yml` compila, prueba, publica el exe, arma zip portable + instalador + `SHA256SUMS.txt` y crea la release en GitHub (prerelease si la versión lleva `-`). También se puede lanzar a mano (Run workflow) para probar sin publicar.
+- Icono: `tools/generate-icon.ps1` regenera `VortexPad.App/Assets/vortexpad.ico`. La app arranca sin administrador (`app.manifest` asInvoker) y solo ofrece elevarse cuando HidHide lo necesita (`DependencyNotices`).
 
 ## Arquitectura (`VortexPad.sln`)
 

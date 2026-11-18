@@ -15,6 +15,8 @@ x86/
 [Oo]ut/
 artifacts/
 publish/
+# Instaladores y zips generados por installer/VortexPad.iss y el workflow de release
+dist/
 *.pdb
 *.ilk
 *.obj

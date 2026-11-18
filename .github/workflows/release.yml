@@ -1,0 +1,103 @@
+name: Release
+
+# Publicar una versión:   git tag v0.1.0   y   git push origin v0.1.0
+# Prueba sin publicar:     Actions → Release → Run workflow (deja los archivos como artefacto)
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión para la prueba (no crea release)'
+        required: false
+        default: '0.0.0-dev'
+
+permissions:
+  contents: write   # crear la release y subir los archivos
+
+jobs:
+  release:
+    name: Empaquetar y publicar
+    runs-on: windows-latest
+
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Determinar versión
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') }
+          else { $v = "${{ inputs.version }}" }
+          if ($v -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "Versión inválida: '$v' (usa vX.Y.Z o vX.Y.Z-beta.1)" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "prerelease=$($v.Contains('-').ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "Versión: $v"
+
+      - name: Compilar y probar (Release, advertencias como error)
+        run: |
+          dotnet restore VortexPad.sln
+          dotnet build VortexPad.sln -c Release --no-restore -warnaserror
+          dotnet test VortexPad.sln -c Release --no-build
+
+      - name: Publicar exe self-contained (win-x64, single-file)
+        run: dotnet publish VortexPad.App/VortexPad.App.csproj -c Release -r win-x64 -p:Version=${{ steps.version.outputs.version }} -o publish
+
+      - name: Empaquetar versión portable (.zip)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path publish/VortexPad.App.exe -DestinationPath "dist/VortexPad-${{ steps.version.outputs.version }}-portable-win-x64.zip"
+
+      - name: Crear instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DPublishDir=..\publish" installer\VortexPad.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC falló con código $LASTEXITCODE" }
+
+      - name: Calcular SHA-256
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt -Encoding utf8
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: Guardar archivos como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: vortexpad-${{ steps.version.outputs.version }}
+          path: dist/*
+
+      - name: Publicar release en GitHub
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: VortexPad ${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: true
+          body: |
+            ## Descargas
+            - **Instalador** (`VortexPad-${{ steps.version.outputs.version }}-setup-win-x64.exe`): recomendado.
+            - **Portable** (`…-portable-win-x64.zip`): un solo `.exe`, sin instalar.
+
+            No necesita .NET instalado. Requiere Windows 10/11 x64.
+            - [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases/latest): necesario para el mando virtual Xbox 360 / DualShock 4.
+            - [HidHide](https://github.com/nefarius/HidHide/releases/latest) (opcional): oculta el mando físico para evitar doble input.
+
+            Verifica los archivos con `SHA256SUMS.txt`.
+          files: dist/*

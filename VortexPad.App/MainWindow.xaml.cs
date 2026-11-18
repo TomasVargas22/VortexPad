@@ -71,6 +71,13 @@ public partial class MainWindow : Window
     private bool _refreshingDevices;
     private bool _selectedDeviceMissing;
 
+    // External dependencies (detected at startup)
+    private bool _dependenciesDetected;
+    private bool _viGEmInstalled;
+    private bool _hidHideInstalled;
+    private bool _isElevated;
+    private readonly HashSet<string> _dismissedNotices = new();
+
     public MainWindow()
     {
         _suppressUiEvents = true;
@@ -113,6 +120,18 @@ public partial class MainWindow : Window
     {
         // If the previous session closed unexpectedly with the controller hidden, make it visible again
         await Task.Run(_hidHideService.RecoverPreviousSession);
+
+        // Required/optional drivers and permissions: detected once, the notices are re-evaluated per profile
+        await Task.Run(() =>
+        {
+            _viGEmInstalled = DriverDetection.IsViGEmBusInstalled();
+            _hidHideInstalled = DriverDetection.IsHidHideInstalled();
+            _isElevated = DriverDetection.IsElevated();
+        });
+        VortexLog.Info("Drivers", $"ViGEmBus={(_viGEmInstalled ? "sí" : "no")}, HidHide={(_hidHideInstalled ? "sí" : "no")}, administrador={(_isElevated ? "sí" : "no")}.");
+        _dependenciesDetected = true;
+        RefreshNotices();
+
         await RefreshDevicesListAsync();
         _deviceWatcher.Start();
 
@@ -131,6 +150,86 @@ public partial class MainWindow : Window
         if (App.StartMinimized && _trayIcon != null)
         {
             WindowState = WindowState.Minimized; // OnWindowStateChanged hides it in the tray
+        }
+    }
+
+    // ---------------- Notices: drivers and permissions ----------------
+
+    /// <summary>Re-evaluates the notices bar (missing drivers, administrator needed for HidHide).</summary>
+    private void RefreshNotices()
+    {
+        if (!_dependenciesDetected) return;
+
+        var notices = DependencyNotices.Evaluate(new DependencyState(
+            ViGEmBusInstalled: _viGEmInstalled,
+            HidHideInstalled: _hidHideInstalled,
+            IsElevated: _isElevated,
+            ProfileWantsHidHide: _activeProfile.HidePhysicalControllerWithHidHide,
+            ProfileNeedsViGEm: _activeProfile.TargetControllerType != VirtualControllerType.KeyboardMouse));
+
+        NoticesBar.ItemsSource = notices.Where(n => !_dismissedNotices.Contains(n.Id)).ToList();
+    }
+
+    private void NoticeDismiss_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DependencyNotice notice })
+        {
+            _dismissedNotices.Add(notice.Id); // only for this session: it shows again on the next launch
+            RefreshNotices();
+        }
+    }
+
+    private void NoticeAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DependencyNotice notice }) return;
+
+        switch (notice.Action)
+        {
+            case NoticeAction.OpenUrl when notice.Url != null:
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(notice.Url) { UseShellExecute = true });
+                }
+                catch (Exception ex)
+                {
+                    VortexLog.Warn("UI", $"No se pudo abrir {notice.Url}.", ex);
+                    TxtFooterStatus.Text = $"Abre manualmente: {notice.Url}";
+                }
+                break;
+
+            case NoticeAction.RestartElevated:
+                RestartAsAdministrator();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Relaunches VortexPad with UAC (only when HidHide needs it). If the user cancels the prompt,
+    /// it keeps running without elevation.
+    /// </summary>
+    private void RestartAsAdministrator()
+    {
+        string? exe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exe)) return;
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe)
+            {
+                UseShellExecute = true,
+                Verb = "runas"
+            });
+            VortexLog.Info("App", "Reiniciando como administrador para usar HidHide.");
+            System.Windows.Application.Current.Shutdown(); // Closed restores HidHide and releases everything
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            TxtFooterStatus.Text = "Se canceló el permiso de administrador; VortexPad sigue sin ocultar el mando.";
+        }
+        catch (Exception ex)
+        {
+            VortexLog.Error("App", "No se pudo reiniciar como administrador.", ex);
+            TxtFooterStatus.Text = "No se pudo reiniciar como administrador (ver log).";
         }
     }
 
@@ -204,6 +303,25 @@ public partial class MainWindow : Window
         TxtHidHideStatus.Text = _hidHideService.StatusText;
     }
 
+    /// <summary>VortexPad icon from the exe (also works when published as a single file).</summary>
+    private static System.Drawing.Icon LoadAppIcon()
+    {
+        try
+        {
+            string? exe = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exe))
+            {
+                var icon = System.Drawing.Icon.ExtractAssociatedIcon(exe);
+                if (icon != null) return icon;
+            }
+        }
+        catch (Exception ex)
+        {
+            VortexLog.Warn("UI", "No se pudo cargar el icono de la app; se usa el genérico.", ex);
+        }
+        return System.Drawing.SystemIcons.Application;
+    }
+
     private void InitializeSystemTray()
     {
         try
@@ -211,7 +329,7 @@ public partial class MainWindow : Window
             _trayIcon = new WinForms.NotifyIcon
             {
                 Text = "VortexPad — 1000Hz Controller Engine",
-                Icon = System.Drawing.SystemIcons.Application,
+                Icon = LoadAppIcon(),
                 Visible = true
             };
 
@@ -340,6 +458,7 @@ public partial class MainWindow : Window
 
         PublishRuntimeProfile();
         PublishFeedbackSettings();
+        RefreshNotices();
     }
 
     /// <summary>Profile header in the center column (name, description, LED, deadzone circles).</summary>
@@ -373,6 +492,7 @@ public partial class MainWindow : Window
 
         // Vibration, LED and adaptive triggers: cheap, and the reader only resends if the result changed
         PublishFeedbackSettings();
+        RefreshNotices(); // the virtual type or HidHide may have changed
 
         switch (what)
         {

@@ -9,7 +9,35 @@
     <UseWindowsForms>true</UseWindowsForms>
     <LangVersion>latest</LangVersion>
     <ApplicationTitle>VortexPad</ApplicationTitle>
+
+    <!-- Identity: the version is overridden in the release workflow with the tag (/p:Version=x.y.z) -->
+    <Version>0.1.0</Version>
+    <Product>VortexPad</Product>
+    <Company>VortexPad</Company>
+    <Description>Remapeador de mandos a 1000 Hz (Xbox / DualShock 4 / teclado y ratón)</Description>
+    <Copyright>© VortexPad</Copyright>
+    <ApplicationIcon>Assets\vortexpad.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
+
+  <!--
+    Distribution publish: dotnet publish VortexPad.App -c Release -r win-x64
+    Self-contained (no .NET install needed) and single-file. Native libraries (WPF included) are
+    extracted on first launch to the user's temporary folder.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <!-- Do not copy the .pdb files of the other projects next to the exe -->
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\vortexpad.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\VortexPad.Core\VortexPad.Core.csproj" />
