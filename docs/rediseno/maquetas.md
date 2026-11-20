@@ -13,7 +13,7 @@ construido sobre el sistema [VortexPad](https://claude.ai/artifact/5TM6fq6oQC2r2
 | Coste | Para ver el resultado al editar hay que confiar en la vista previa pequeña (A2) o alternar con Ctrl+1 | A 1120×720 el editor queda en ~720 px y hay que desplazar (B2); perfiles y ajustes van a menús |
 | Atajos | Ctrl+1…5 mapean a secciones del riel | Ctrl+1…8 a pestañas del editor; perfil y ajustes sin atajo propio |
 
-**Recomendación: A**, con la vista previa en vivo del stick dentro de cada sección del editor (como en A2).
+**Aprobada: A** (19-11-2026), con la vista previa en vivo del stick dentro de cada sección del editor (como en A2).
 Resuelve I1 (pestañas que se reordenan), I3 (estado y ajustes escondidos) y C2 (1120×720) sin desplazamiento.
 
 ## Crítica de diseño (design-critique)
