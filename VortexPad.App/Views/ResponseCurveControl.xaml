@@ -1,0 +1,55 @@
+<UserControl x:Class="VortexPad.App.Views.ResponseCurveControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinHeight="120">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Eje Y -->
+        <Grid Grid.Column="0" Margin="0,0,8,0">
+            <TextBlock Style="{StaticResource Text.Data}" Text="1" VerticalAlignment="Top" HorizontalAlignment="Right"/>
+            <TextBlock Style="{StaticResource Text.Data}" Text="0,5" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+            <TextBlock Style="{StaticResource Text.Data}" Text="0" VerticalAlignment="Bottom" HorizontalAlignment="Right"/>
+        </Grid>
+
+        <Border Grid.Column="1" Background="{StaticResource Brush.Surface2}" CornerRadius="{StaticResource Radius.Md}" ClipToBounds="True">
+            <Canvas x:Name="Plot" Background="{StaticResource Brush.Transparent}" ClipToBounds="True" SizeChanged="Plot_SizeChanged"
+                    AutomationProperties.Name="Curva de respuesta">
+                <Line x:Name="GridV" Stroke="{StaticResource Brush.Line}" StrokeThickness="1"/>
+                <Line x:Name="GridH" Stroke="{StaticResource Brush.Line}" StrokeThickness="1"/>
+                <Line x:Name="Diagonal" Stroke="{StaticResource Brush.LineStrong}" StrokeThickness="1" StrokeDashArray="4,4"/>
+                <Line x:Name="LineHandle1" Stroke="{StaticResource Brush.LineControl}" StrokeThickness="1" StrokeDashArray="2,2"/>
+                <Line x:Name="LineHandle2" Stroke="{StaticResource Brush.LineControl}" StrokeThickness="1" StrokeDashArray="2,2"/>
+                <Polyline x:Name="PolyCurve" Stroke="{StaticResource Brush.Accent}" StrokeThickness="2.5" StrokeLineJoin="Round"/>
+                <Ellipse x:Name="DotLive" Width="10" Height="10" Fill="{StaticResource Brush.Text}" Stroke="{StaticResource Brush.Bg}" StrokeThickness="2"
+                         IsHitTestVisible="False"/>
+                <Ellipse x:Name="HandleP1" Width="16" Height="16" Fill="{StaticResource Brush.LiveAlt}" Stroke="{StaticResource Brush.Bg}" StrokeThickness="2"
+                         Cursor="SizeNS" Focusable="True" FocusVisualStyle="{x:Null}"
+                         ToolTip="Punto 1 de la curva: arrastra o usa las flechas (Mayús para pasos grandes)"
+                         AutomationProperties.Name="Punto 1 de la curva Bézier"
+                         MouseLeftButtonDown="Handle_MouseDown" MouseMove="Handle_MouseMove" MouseLeftButtonUp="Handle_MouseUp"
+                         KeyDown="Handle_KeyDown" GotKeyboardFocus="Handle_FocusChanged" LostKeyboardFocus="Handle_FocusChanged"/>
+                <Ellipse x:Name="HandleP2" Width="16" Height="16" Fill="{StaticResource Brush.LiveAlt}" Stroke="{StaticResource Brush.Bg}" StrokeThickness="2"
+                         Cursor="SizeNS" Focusable="True" FocusVisualStyle="{x:Null}"
+                         ToolTip="Punto 2 de la curva: arrastra o usa las flechas (Mayús para pasos grandes)"
+                         AutomationProperties.Name="Punto 2 de la curva Bézier"
+                         MouseLeftButtonDown="Handle_MouseDown" MouseMove="Handle_MouseMove" MouseLeftButtonUp="Handle_MouseUp"
+                         KeyDown="Handle_KeyDown" GotKeyboardFocus="Handle_FocusChanged" LostKeyboardFocus="Handle_FocusChanged"/>
+            </Canvas>
+        </Border>
+
+        <!-- Eje X -->
+        <Grid Grid.Row="1" Grid.Column="1" Margin="0,6,0,0">
+            <TextBlock Style="{StaticResource Text.Data}" Text="0 %" HorizontalAlignment="Left"/>
+            <TextBlock Style="{StaticResource Text.Data}" Text="50 %" HorizontalAlignment="Center"/>
+            <TextBlock Style="{StaticResource Text.Data}" Text="100 %" HorizontalAlignment="Right"/>
+        </Grid>
+    </Grid>
+</UserControl>

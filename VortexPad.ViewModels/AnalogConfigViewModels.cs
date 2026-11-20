@@ -17,6 +17,24 @@ public sealed class StickViewModel : EditableViewModel
 
     public string Title { get; }
 
+    /// <summary>Puts every setting of this stick back to the default values (one edit per property).</summary>
+    public void ResetToDefaults()
+    {
+        var d = new StickConfiguration();
+        DeadzoneMode = d.DeadzoneMode;
+        InnerDeadzone = d.InnerDeadzone;
+        OuterDeadzone = d.OuterDeadzone;
+        AntiDeadzone = d.AntiDeadzone;
+        AxialDeadzone = d.AxialDeadzone;
+        Sensitivity = d.Sensitivity;
+        InvertX = d.InvertX;
+        InvertY = d.InvertY;
+        CurveType = d.CurveType;
+        CurveExponent = d.CurveExponent;
+        BezierP1 = d.BezierP1;
+        BezierP2 = d.BezierP2;
+    }
+
     public DeadzoneMode DeadzoneMode
     {
         get => _m.DeadzoneMode;

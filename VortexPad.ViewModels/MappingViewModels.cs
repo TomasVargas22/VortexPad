@@ -263,7 +263,8 @@ public sealed class MacroViewModel : EditableViewModel
         _m = model;
         foreach (var step in model.Steps) Steps.Add(new MacroStepViewModel(step, OnStepEdited));
 
-        AddStepCommand = new RelayCommand(AddStep);
+        AddStepCommand = new RelayCommand(() => AddStep(MacroStepType.TapButton));
+        AddWaitStepCommand = new RelayCommand(() => AddStep(MacroStepType.WaitMilliseconds));
         RemoveStepCommand = new RelayCommand<MacroStepViewModel>(RemoveStep);
         MoveStepUpCommand = new RelayCommand<MacroStepViewModel>(s => MoveStep(s, -1));
         MoveStepDownCommand = new RelayCommand<MacroStepViewModel>(s => MoveStep(s, +1));
@@ -272,7 +273,10 @@ public sealed class MacroViewModel : EditableViewModel
     public MacroDefinition Model => _m;
     public ObservableCollection<MacroStepViewModel> Steps { get; } = new();
 
+    /// <summary>Adds a "tap button" step.</summary>
     public IRelayCommand AddStepCommand { get; }
+    /// <summary>Adds a "wait" step.</summary>
+    public IRelayCommand AddWaitStepCommand { get; }
     public IRelayCommand<MacroStepViewModel> RemoveStepCommand { get; }
     public IRelayCommand<MacroStepViewModel> MoveStepUpCommand { get; }
     public IRelayCommand<MacroStepViewModel> MoveStepDownCommand { get; }
@@ -298,9 +302,11 @@ public sealed class MacroViewModel : EditableViewModel
     /// <summary>Total duration of one run of the macro.</summary>
     public int TotalDurationMs => _m.Steps.Sum(s => Math.Max(1, s.DurationMs));
 
-    private void AddStep()
+    private void AddStep(MacroStepType type)
     {
-        var step = new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.South, DurationMs = 50 };
+        var step = type == MacroStepType.WaitMilliseconds
+            ? new MacroStep { StepType = MacroStepType.WaitMilliseconds, DurationMs = 80 }
+            : new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.South, DurationMs = 50 };
         _m.Steps.Add(step);
         Steps.Add(new MacroStepViewModel(step, OnStepEdited));
         OnStepsChanged();

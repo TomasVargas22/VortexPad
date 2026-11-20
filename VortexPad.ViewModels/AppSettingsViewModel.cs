@@ -52,6 +52,13 @@ public sealed class AppSettingsViewModel : EditableViewModel
         set => Edit(Settings.StartEmulationOnLaunch, value, v => Settings.StartEmulationOnLaunch = v);
     }
 
+    /// <summary>Rail collapsed/expanded chosen with Ctrl+B (null = automatic by width).</summary>
+    public bool? NavRailCollapsed
+    {
+        get => Settings.NavRailCollapsed;
+        set => Edit(Settings.NavRailCollapsed, value, v => Settings.NavRailCollapsed = v);
+    }
+
     /// <summary>Remembers the last profile used (saved, without firing <see cref="SettingChanged"/>).</summary>
     public void RememberProfile(string? profileId)
     {

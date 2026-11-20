@@ -24,6 +24,9 @@ public sealed class AppSettings
     /// <summary>Start emulation automatically when the app opens.</summary>
     public bool StartEmulationOnLaunch { get; set; } = true;
 
+    /// <summary>Rail pinned collapsed (true) or expanded (false) by the user; null = decided by the window width.</summary>
+    public bool? NavRailCollapsed { get; set; }
+
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
 }
 

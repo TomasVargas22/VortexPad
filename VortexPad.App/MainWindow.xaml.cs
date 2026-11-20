@@ -1,8 +1,15 @@
+using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Automation;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using VortexPad.AI;
+using VortexPad.App.Views;
 using VortexPad.Core.Automation;
 using VortexPad.Core.Devices;
 using VortexPad.Core.Diagnostics;
@@ -15,10 +22,11 @@ using VortexPad.Core.Settings;
 using VortexPad.Emulation;
 using VortexPad.Input;
 using VortexPad.ViewModels;
+using Binding = System.Windows.Data.Binding;
+using Brush = System.Windows.Media.Brush;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MessageBox = System.Windows.MessageBox;
-using Color = System.Windows.Media.Color;
-using ColorConverter = System.Windows.Media.ColorConverter;
-using Point = System.Windows.Point;
+using RadioButton = System.Windows.Controls.RadioButton;
 using WinForms = System.Windows.Forms;
 
 namespace VortexPad.App;
@@ -57,13 +65,14 @@ public partial class MainWindow : Window
         string LightbarHex,
         AdaptiveTriggerEffect LeftTrigger = default,
         AdaptiveTriggerEffect RightTrigger = default);
-    private volatile FeedbackSettings _feedbackSettings = new(new ForceFeedbackConfiguration(), "#00E5FF");
+    private volatile FeedbackSettings _feedbackSettings = new(new ForceFeedbackConfiguration(), new ControllerProfile().LightbarHex);
     private volatile ForceFeedbackState? _lastGameFeedback;
     private bool _suppressUiEvents;
     private WinForms.NotifyIcon? _trayIcon;
 
     // Profile editor (MVVM): edits _activeProfile in place and notifies every change
     private readonly ProfileEditorViewModel _profileEditor = new();
+    private readonly Autosaver<ControllerProfile> _autosaver;
 
     // App settings (settings.json) and controller hot-plug
     private readonly AppSettingsViewModel _appSettings = new(new AppSettingsStore());
@@ -71,12 +80,28 @@ public partial class MainWindow : Window
     private bool _refreshingDevices;
     private bool _selectedDeviceMissing;
 
-    // External dependencies (detected at startup)
+    // External dependencies (detected at startup and with "Comprobar de nuevo")
     private bool _dependenciesDetected;
     private bool _viGEmInstalled;
     private bool _hidHideInstalled;
     private bool _isElevated;
     private readonly HashSet<string> _dismissedNotices = new();
+
+    // Shell: navigation, status chips, transient messages
+    private readonly NavigationState _navigation = new();
+    private readonly StatusItem _emulationStatus = new("", "Emulación detenida");
+    private readonly StatusItem _vigemStatus = new("ViGEmBus", "Comprobando…", StatusSeverity.Info);
+    private readonly StatusItem _hidHideStatus = new("HidHide", "Comprobando…", StatusSeverity.Info);
+    private readonly StatusItem _saveStatus = new("", "Guardado", StatusSeverity.Ok);
+    private readonly StatusItem _summaryStatus = new("", "Comprobando…", StatusSeverity.Info);
+    private readonly DispatcherTimer _messageTimer = new() { Interval = TimeSpan.FromSeconds(8) };
+    private readonly Dictionary<RadioButton, AppSection> _navItems = new();
+    private ListCollectionView? _profilesView;
+    private bool _syncingProfileSelection;
+    private bool _isCompact;
+
+    // Button matrix brushes (theme resources, no literals)
+    private Brush _pillOn = null!, _pillOff = null!, _pillTextOn = null!, _pillTextOff = null!;
 
     public MainWindow()
     {
@@ -85,10 +110,25 @@ public partial class MainWindow : Window
         _activeProfile = _profiles.FirstOrDefault(p => p.Id == _appSettings.Settings.LastProfileId) ?? _profiles.First();
         _runtimeProfile = ProfileRepository.DeepCopy(_activeProfile);
 
-        InitializeComponent();
+        // Autosave (C1): 800 ms after the last edit, snapshot on the UI thread, write on the thread pool
+        _autosaver = new Autosaver<ControllerProfile>(
+            () => ProfileRepository.DeepCopy(_activeProfile),
+            p => _profileRepository.SaveProfile(p),
+            TimeSpan.FromMilliseconds(800));
+        _autosaver.PropertyChanged += (_, _) => UpdateSaveStatus();
 
-        ProfileEditor.DataContext = _profileEditor;
+        InitializeComponent();
+        InitializeShell();
+
+        foreach (FrameworkElement editorPart in new FrameworkElement[]
+                 { EditorSticks, EditorButtons, EditorGyro, EditorFeedback, MacrosEditor, EditorDualSense, PageSticks, ProfileDetail })
+        {
+            editorPart.DataContext = _profileEditor;
+        }
+        LiveCurve.SetBinding(ResponseCurveControl.StickProperty, new Binding(nameof(ProfileEditorViewModel.CurveStick)) { Source = _profileEditor });
+        TxtLiveCurveTitle.SetBinding(TextBlock.TextProperty, new Binding("CurveStick.Title") { Source = _profileEditor, StringFormat = "Curva · {0}" });
         _profileEditor.ProfileEdited += OnProfileEdited;
+        MacrosEditor.TestRequested += OnTestMacroRequested;
 
         SettingsPanel.DataContext = _appSettings;
         _appSettings.SettingChanged += OnAppSettingChanged;
@@ -104,6 +144,7 @@ public partial class MainWindow : Window
         InitializeSystemTray();
         RefreshProfilesList();
         LoadProfileIntoUi(_activeProfile);
+        UpdateEngineUi();
 
         _uiRefreshTimer = new DispatcherTimer
         {
@@ -116,12 +157,373 @@ public partial class MainWindow : Window
         Closed += OnMainWindowClosed;
     }
 
+    // ---------------- Shell: navigation, chips, layout ----------------
+
+    private void InitializeShell()
+    {
+        _pillOn = (Brush)FindResource("Brush.Accent");
+        _pillOff = (Brush)FindResource("Brush.Surface2");
+        _pillTextOn = (Brush)FindResource("Brush.AccentInk");
+        _pillTextOff = (Brush)FindResource("Brush.Text");
+
+        _navItems[NavLive] = AppSection.LivePanel;
+        _navItems[NavProfiles] = AppSection.Profiles;
+        _navItems[NavSticks] = AppSection.Sticks;
+        _navItems[NavButtons] = AppSection.Buttons;
+        _navItems[NavGyro] = AppSection.Gyro;
+        _navItems[NavFeedback] = AppSection.Feedback;
+        _navItems[NavMacros] = AppSection.Macros;
+        _navItems[NavDualSense] = AppSection.DualSense;
+        _navItems[NavSettings] = AppSection.Settings;
+
+        var chips = new[] { _vigemStatus, _hidHideStatus, _saveStatus };
+        ChipEmulation.Content = _emulationStatus;
+        ChipsPanel.ItemsSource = chips;
+        ChipsPopupList.ItemsSource = chips;
+        ChipSummaryContent.Content = _summaryStatus;
+        SettingsVigemChip.Content = _vigemStatus;
+        SettingsHidHideChip.Content = _hidHideStatus;
+        foreach (var chip in chips) chip.PropertyChanged += (_, _) => UpdateSummaryStatus();
+
+        _messageTimer.Tick += (_, _) => HideMessage();
+        _navigation.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(NavigationState.DualSenseVisible))
+                NavDualSense.Visibility = _navigation.DualSenseVisible ? Visibility.Visible : Visibility.Collapsed;
+        };
+
+        TxtProfilesFolder.Text = _profileRepository.StorageDirectory;
+        string version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        TxtVersion.Text = $"VortexPad {version}";
+    }
+
+    private void Nav_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton item && _navItems.TryGetValue(item, out var section)) Navigate(section);
+    }
+
+    private void Navigate(AppSection section)
+    {
+        _navigation.Navigate(section);
+        var current = _navigation.Current;
+
+        foreach (var (item, itemSection) in _navItems) item.IsChecked = itemSection == current;
+
+        var target = SectionElement(current);
+        foreach (var page in new[] { SecLive, SecProfiles, SecSticks, SecButtons, SecGyro, SecFeedback, SecMacros, SecDualSense, SecSettings })
+        {
+            page.Visibility = ReferenceEquals(page, target) ? Visibility.Visible : Visibility.Collapsed;
+        }
+        FadeIn(target);
+        Dispatcher.BeginInvoke(() => AccessibleNames.Apply(this), DispatcherPriority.Loaded);
+    }
+
+    private ScrollViewer SectionElement(AppSection section) => section switch
+    {
+        AppSection.Profiles => SecProfiles,
+        AppSection.Sticks => SecSticks,
+        AppSection.Buttons => SecButtons,
+        AppSection.Gyro => SecGyro,
+        AppSection.Feedback => SecFeedback,
+        AppSection.Macros => SecMacros,
+        AppSection.DualSense => SecDualSense,
+        AppSection.Settings => SecSettings,
+        _ => SecLive
+    };
+
+    /// <summary>Section change: 180 ms fade + 8 px rise, only if Windows has animations enabled.</summary>
+    private static void FadeIn(UIElement element)
+    {
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            element.Opacity = 1;
+            return;
+        }
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(180));
+        var move = new TranslateTransform(0, 8);
+        element.RenderTransform = move;
+        element.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration) { EasingFunction = ease });
+        move.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(8, 0, duration) { EasingFunction = ease });
+    }
+
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e) => ApplyLayoutMode();
+
+    /// <summary>Below 1280 px: collapsed rail (unless pinned with Ctrl+B), grouped chips, short labels.</summary>
+    private void ApplyLayoutMode()
+    {
+        double width = ActualWidth;
+        bool collapse = NavigationState.ShouldCollapseRail(width, _appSettings.NavRailCollapsed);
+        _isCompact = NavigationState.IsCompact(width);
+
+        Rail.Width = (double)FindResource(collapse ? "Size.NavCollapsedW" : "Size.NavW");
+        Rail.Padding = collapse ? new Thickness(10, 12, 10, 12) : new Thickness(12);
+        string mode = collapse ? "Collapsed" : "Expanded";
+        NavItems.Tag = mode;
+        NavBottom.Tag = mode;
+        TxtBrand.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
+        GroupEditor.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
+        BtnToggleRail.Content = collapse ? "" : "";
+        string toggleText = collapse ? "Expandir el menú" : "Contraer el menú";
+        BtnToggleRail.ToolTip = $"{toggleText} · Ctrl+B";
+        AutomationProperties.SetName(BtnToggleRail, toggleText);
+
+        ApplyChipsFit();
+        StatusBar.Padding = new Thickness(_isCompact ? 16 : 24, 0, _isCompact ? 16 : 24, 0);
+        CmbPhysicalDevices.Width = _isCompact ? 200 : 240;
+        CmbProfileQuick.Width = _isCompact ? 180 : 220;
+        UpdateEngineUi();
+    }
+
+    /// <summary>
+    /// Shows the chips one by one if they fit in the status bar; otherwise (always below 1280 px) groups them
+    /// into the summary chip, so no chip is ever cut in half.
+    /// </summary>
+    private void ApplyChipsFit()
+    {
+        bool grouped = _isCompact;
+        double available = StatusGrid.ColumnDefinitions[1].ActualWidth;
+        if (!grouped && available > 0)
+        {
+            // A collapsed element measures 0: make it visible first so its real width is known
+            ChipsPanel.Visibility = Visibility.Visible;
+            var unbounded = new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity);
+            ChipEmulation.Measure(unbounded);
+            ChipsPanel.Measure(unbounded);
+            grouped = ChipEmulation.DesiredSize.Width + ChipsPanel.DesiredSize.Width > available;
+        }
+        ChipsPanel.Visibility = grouped ? Visibility.Collapsed : Visibility.Visible;
+        ChipSummary.Visibility = grouped ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void BtnToggleRail_Click(object sender, RoutedEventArgs e) => ToggleRail();
+
+    private void ToggleRail()
+    {
+        bool collapsedNow = NavigationState.ShouldCollapseRail(ActualWidth, _appSettings.NavRailCollapsed);
+        _appSettings.NavRailCollapsed = !collapsedNow;
+        ApplyLayoutMode();
+    }
+
+    /// <summary>F5, Ctrl+1…5, Ctrl+Tab / Ctrl+Mayús+Tab, Ctrl+B.</summary>
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+        bool shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+
+        if (e.Key == Key.F5 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            if (BtnToggleEngine.IsEnabled) BtnToggleEngine_Click(BtnToggleEngine, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+        if (!ctrl) return;
+
+        int digit = e.Key switch
+        {
+            >= Key.D1 and <= Key.D5 => e.Key - Key.D0,
+            >= Key.NumPad1 and <= Key.NumPad5 => e.Key - Key.NumPad0,
+            _ => 0
+        };
+        if (digit > 0 && _navigation.SectionForShortcut(digit) is { } section)
+        {
+            Navigate(section);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Tab)
+        {
+            CycleProfile(shift ? -1 : 1);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.B)
+        {
+            ToggleRail();
+            e.Handled = true;
+        }
+    }
+
+    private void CycleProfile(int direction)
+    {
+        var ordered = _profilesView?.Cast<ControllerProfile>().ToList() ?? _profiles;
+        if (ordered.Count == 0) return;
+        int index = ordered.IndexOf(_activeProfile);
+        int next = ((index < 0 ? 0 : index) + direction + ordered.Count) % ordered.Count;
+        ActivateProfile(ordered[next]);
+        ShowMessage($"Perfil activo: {_activeProfile.Name}.", StatusSeverity.Info);
+    }
+
+    private void UpdateSummaryStatus()
+    {
+        var worst = StatusItem.Worst(new[] { _vigemStatus, _hidHideStatus, _saveStatus });
+        if (worst == null || worst.Severity <= StatusSeverity.Ok)
+            _summaryStatus.Set("Todo listo", StatusSeverity.Ok, "ViGEmBus, HidHide y guardado sin problemas");
+        else
+            _summaryStatus.Set(worst.AccessibleText, worst.Severity, "Pulsa para ver el estado de los controladores");
+
+        // Chip texts changed width: re-check whether they fit, once layout has updated
+        Dispatcher.BeginInvoke(ApplyChipsFit, DispatcherPriority.Loaded);
+    }
+
+    private void UpdateSaveStatus()
+    {
+        switch (_autosaver.Status)
+        {
+            case SaveStatus.Pending:
+            case SaveStatus.Saving:
+                _saveStatus.Set("Guardando…", StatusSeverity.Info);
+                break;
+            case SaveStatus.Failed:
+                _saveStatus.Set("No se pudo guardar", StatusSeverity.Error, _autosaver.LastError);
+                VortexLog.Error("Perfiles", $"No se pudo guardar '{_activeProfile.Name}': {_autosaver.LastError}");
+                break;
+            default:
+                _saveStatus.Set("Guardado", StatusSeverity.Ok, "Los cambios del perfil se guardan solos");
+                break;
+        }
+    }
+
+    private void UpdateDriverStatus()
+    {
+        if (!_dependenciesDetected)
+        {
+            _vigemStatus.Set("Comprobando…", StatusSeverity.Info);
+            _hidHideStatus.Set("Comprobando…", StatusSeverity.Info);
+            return;
+        }
+
+        if (!_viGEmInstalled)
+            _vigemStatus.Set("No instalado", StatusSeverity.Error, "Sin ViGEmBus no se puede crear el mando virtual");
+        else if (_pollingLoop.IsRunning && !_vigemService.IsControllerConnected && NeedsViGEm(_activeProfile))
+            _vigemStatus.Set(_vigemService.StatusMessage, StatusSeverity.Error);
+        else if (_pollingLoop.IsRunning && NeedsViGEm(_activeProfile))
+            _vigemStatus.Set("Conectado", StatusSeverity.Ok, _vigemService.StatusMessage);
+        else
+            _vigemStatus.Set("Listo", StatusSeverity.Ok, "Instalado y listo para crear el mando virtual");
+
+        bool wantsHide = _activeProfile.HidePhysicalControllerWithHidHide;
+        if (!_hidHideInstalled)
+            _hidHideStatus.Set("No instalado", wantsHide ? StatusSeverity.Warning : StatusSeverity.Neutral,
+                "Opcional: sin HidHide algunos juegos ven el mando físico y el virtual a la vez");
+        else if (wantsHide && !_isElevated)
+            _hidHideStatus.Set("Requiere permisos", StatusSeverity.Warning, "Reinicia VortexPad como administrador para ocultar el mando");
+        else if (!wantsHide)
+            _hidHideStatus.Set("Sin ocultar", StatusSeverity.Neutral, "Este perfil no oculta el mando físico");
+        else
+            _hidHideStatus.Set(_hidHideService.IsDeviceCurrentlyCloaked ? "Mando oculto" : "Listo", StatusSeverity.Ok, _hidHideService.StatusText);
+
+        BtnRestartAdmin.Visibility = _hidHideInstalled && wantsHide && !_isElevated ? Visibility.Visible : Visibility.Collapsed;
+        UpdateEngineUi();
+    }
+
+    private static bool NeedsViGEm(ControllerProfile profile) => profile.TargetControllerType != VirtualControllerType.KeyboardMouse;
+
+    private static string TargetLabel(VirtualControllerType type) => type switch
+    {
+        VirtualControllerType.DualShock4 => "DualShock 4",
+        VirtualControllerType.KeyboardMouse => "Teclado y ratón",
+        VirtualControllerType.HybridXboxKeyboard => "Xbox + teclado",
+        _ => "Xbox 360"
+    };
+
+    /// <summary>Start/stop button and emulation chip (label, icon, enabled state with its reason).</summary>
+    private void UpdateEngineUi()
+    {
+        bool running = _pollingLoop.IsRunning;
+        TxtEngineIcon.Text = running ? "" : "";
+        TxtEngineLabel.Text = running
+            ? (_isCompact ? "Detener" : "Detener emulación")
+            : (_isCompact ? "Iniciar" : "Iniciar emulación");
+
+        bool blocked = !running && _dependenciesDetected && !_viGEmInstalled && NeedsViGEm(_activeProfile);
+        BtnToggleEngine.IsEnabled = !blocked;
+        AutomationProperties.SetName(BtnToggleEngine, running ? "Detener emulación" : "Iniciar emulación");
+        BtnToggleEngine.ToolTip = blocked
+            ? "Instala ViGEmBus para crear el mando virtual"
+            : running ? "Detener emulación · F5" : "Iniciar emulación · F5";
+
+        if (running)
+            _emulationStatus.Set($"Emulando · {TargetLabel(_activeProfile.TargetControllerType)}", StatusSeverity.Live);
+        else
+            _emulationStatus.Set("Emulación detenida", StatusSeverity.Neutral);
+    }
+
+    // ---------------- Transient messages (replace the old footer) ----------------
+
+    private void ShowMessage(string text, StatusSeverity severity)
+    {
+        TxtFooterStatus.Text = text;
+        var (brushKey, softKey, glyph) = severity switch
+        {
+            StatusSeverity.Error => ("Brush.Danger", "Brush.DangerSoft", ""),
+            StatusSeverity.Warning => ("Brush.Warn", "Brush.WarnSoft", ""),
+            StatusSeverity.Ok => ("Brush.Ok", "Brush.OkSoft", ""),
+            _ => ("Brush.Info", "Brush.InfoSoft", "")
+        };
+        MessageBar.Background = (Brush)FindResource(softKey);
+        MessageBar.BorderBrush = (Brush)FindResource(brushKey);
+        TxtMessageIcon.Foreground = (Brush)FindResource(brushKey);
+        TxtMessageIcon.Text = glyph;
+        AutomationProperties.SetLiveSetting(MessageBar, severity == StatusSeverity.Error
+            ? System.Windows.Automation.AutomationLiveSetting.Assertive
+            : System.Windows.Automation.AutomationLiveSetting.Polite);
+        MessageBar.Visibility = Visibility.Visible;
+        UpdateNoticesArea();
+        FadeIn(MessageBar);
+
+        // Errors and warnings stay until closed; the rest goes away by itself
+        _messageTimer.Stop();
+        if (severity is not (StatusSeverity.Error or StatusSeverity.Warning)) _messageTimer.Start();
+    }
+
+    private void HideMessage()
+    {
+        _messageTimer.Stop();
+        MessageBar.Visibility = Visibility.Collapsed;
+        UpdateNoticesArea();
+    }
+
+    /// <summary>The notices area takes no space when there is nothing to say.</summary>
+    private void UpdateNoticesArea()
+    {
+        bool any = MessageBar.Visibility == Visibility.Visible || NoticesBar.Items.Count > 0;
+        NoticesArea.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MessageDismiss_Click(object sender, RoutedEventArgs e) => HideMessage();
+
+    // ---------------- Startup ----------------
+
     private async void OnMainWindowLoaded(object sender, RoutedEventArgs e)
     {
+        ApplyLayoutMode();
+        AccessibleNames.Apply(this);
+
         // If the previous session closed unexpectedly with the controller hidden, make it visible again
         await Task.Run(_hidHideService.RecoverPreviousSession);
 
-        // Required/optional drivers and permissions: detected once, the notices are re-evaluated per profile
+        await DetectDependenciesAsync();
+
+        await RefreshDevicesListAsync();
+        _deviceWatcher.Start();
+
+        // Keeps the Run entry pointing at the current exe (in case the app was moved)
+        if (_appSettings.StartWithWindows) StartupRegistration.Apply(true);
+
+        if (_appSettings.StartEmulationOnLaunch && (_viGEmInstalled || !NeedsViGEm(_activeProfile)))
+        {
+            await StartEmulationEngineAsync();
+        }
+
+        if (App.StartMinimized && _trayIcon != null)
+        {
+            WindowState = WindowState.Minimized; // OnWindowStateChanged hides it in the tray
+        }
+    }
+
+    /// <summary>Required/optional drivers and permissions. Also run by "Comprobar de nuevo" after installing one.</summary>
+    private async Task DetectDependenciesAsync()
+    {
         await Task.Run(() =>
         {
             _viGEmInstalled = DriverDetection.IsViGEmBusInstalled();
@@ -131,43 +533,34 @@ public partial class MainWindow : Window
         VortexLog.Info("Drivers", $"ViGEmBus={(_viGEmInstalled ? "sí" : "no")}, HidHide={(_hidHideInstalled ? "sí" : "no")}, administrador={(_isElevated ? "sí" : "no")}.");
         _dependenciesDetected = true;
         RefreshNotices();
-
-        await RefreshDevicesListAsync();
-        _deviceWatcher.Start();
-
-        // Keeps the Run entry pointing at the current exe (in case the app was moved)
-        if (_appSettings.StartWithWindows) StartupRegistration.Apply(true);
-
-        if (_appSettings.StartEmulationOnLaunch)
-        {
-            await StartEmulationEngineAsync();
-        }
-        else
-        {
-            TxtFooterStatus.Text = "Emulación detenida (inicio automático desactivado en Ajustes).";
-        }
-
-        if (App.StartMinimized && _trayIcon != null)
-        {
-            WindowState = WindowState.Minimized; // OnWindowStateChanged hides it in the tray
-        }
+        UpdateDriverStatus();
     }
 
-    // ---------------- Notices: drivers and permissions ----------------
+    // ---------------- Notices: drivers, permissions, disconnected controller ----------------
 
-    /// <summary>Re-evaluates the notices bar (missing drivers, administrator needed for HidHide).</summary>
+    /// <summary>Re-evaluates the notices (missing drivers, administrator needed for HidHide, controller unplugged).</summary>
     private void RefreshNotices()
     {
-        if (!_dependenciesDetected) return;
+        var notices = new List<DependencyNotice>();
 
-        var notices = DependencyNotices.Evaluate(new DependencyState(
-            ViGEmBusInstalled: _viGEmInstalled,
-            HidHideInstalled: _hidHideInstalled,
-            IsElevated: _isElevated,
-            ProfileWantsHidHide: _activeProfile.HidePhysicalControllerWithHidHide,
-            ProfileNeedsViGEm: _activeProfile.TargetControllerType != VirtualControllerType.KeyboardMouse));
+        if (_selectedDeviceMissing && _selectedDevice != null)
+        {
+            notices.Add(new DependencyNotice("device-disconnected", NoticeSeverity.Warning,
+                $"Se desconectó {_selectedDevice.DisplayName}. El mando virtual sigue activo y en reposo; vuelve a conectarlo y la emulación continúa sola."));
+        }
+
+        if (_dependenciesDetected)
+        {
+            notices.AddRange(DependencyNotices.Evaluate(new DependencyState(
+                ViGEmBusInstalled: _viGEmInstalled,
+                HidHideInstalled: _hidHideInstalled,
+                IsElevated: _isElevated,
+                ProfileWantsHidHide: _activeProfile.HidePhysicalControllerWithHidHide,
+                ProfileNeedsViGEm: NeedsViGEm(_activeProfile))));
+        }
 
         NoticesBar.ItemsSource = notices.Where(n => !_dismissedNotices.Contains(n.Id)).ToList();
+        UpdateNoticesArea();
     }
 
     private void NoticeDismiss_Click(object sender, RoutedEventArgs e)
@@ -177,6 +570,17 @@ public partial class MainWindow : Window
             _dismissedNotices.Add(notice.Id); // only for this session: it shows again on the next launch
             RefreshNotices();
         }
+    }
+
+    private async void NoticeRecheck_Click(object sender, RoutedEventArgs e)
+    {
+        bool hadViGEm = _viGEmInstalled, hadHidHide = _hidHideInstalled;
+        await DetectDependenciesAsync();
+
+        if (_viGEmInstalled && !hadViGEm || _hidHideInstalled && !hadHidHide)
+            ShowMessage("Controlador detectado. Ya puedes iniciar la emulación.", StatusSeverity.Ok);
+        else
+            ShowMessage("Todavía falta el controlador. Si acabas de instalarlo y sigue sin aparecer, reinicia Windows.", StatusSeverity.Warning);
     }
 
     private void NoticeAction_Click(object sender, RoutedEventArgs e)
@@ -193,7 +597,7 @@ public partial class MainWindow : Window
                 catch (Exception ex)
                 {
                     VortexLog.Warn("UI", $"No se pudo abrir {notice.Url}.", ex);
-                    TxtFooterStatus.Text = $"Abre manualmente: {notice.Url}";
+                    ShowMessage($"No se pudo abrir el navegador. Abre a mano: {notice.Url}", StatusSeverity.Warning);
                 }
                 break;
 
@@ -202,6 +606,8 @@ public partial class MainWindow : Window
                 break;
         }
     }
+
+    private void BtnRestartAdmin_Click(object sender, RoutedEventArgs e) => RestartAsAdministrator();
 
     /// <summary>
     /// Relaunches VortexPad with UAC (only when HidHide needs it). If the user cancels the prompt,
@@ -214,6 +620,7 @@ public partial class MainWindow : Window
 
         try
         {
+            _autosaver.Flush();
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe)
             {
                 UseShellExecute = true,
@@ -224,12 +631,12 @@ public partial class MainWindow : Window
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            TxtFooterStatus.Text = "Se canceló el permiso de administrador; VortexPad sigue sin ocultar el mando.";
+            ShowMessage("Se canceló el permiso de administrador. VortexPad sigue funcionando sin ocultar el mando.", StatusSeverity.Info);
         }
         catch (Exception ex)
         {
             VortexLog.Error("App", "No se pudo reiniciar como administrador.", ex);
-            TxtFooterStatus.Text = "No se pudo reiniciar como administrador (ver log).";
+            ShowMessage("No se pudo reiniciar como administrador. Más detalles en el registro.", StatusSeverity.Error);
         }
     }
 
@@ -245,7 +652,7 @@ public partial class MainWindow : Window
             case nameof(AppSettingsViewModel.StartWithWindows):
                 if (!StartupRegistration.Apply(_appSettings.StartWithWindows))
                 {
-                    TxtFooterStatus.Text = "No se pudo cambiar el inicio con Windows (ver log).";
+                    ShowMessage("No se pudo cambiar el inicio con Windows. Más detalles en el registro.", StatusSeverity.Error);
                 }
                 break;
         }
@@ -266,20 +673,21 @@ public partial class MainWindow : Window
         Activate();
     }
 
-    private void BtnOpenLogs_Click(object sender, RoutedEventArgs e)
+    private void BtnOpenLogs_Click(object sender, RoutedEventArgs e) => OpenFolder(RotatingFileLogSink.DefaultDirectory, "registro");
+
+    private void BtnOpenProfilesFolder_Click(object sender, RoutedEventArgs e) => OpenFolder(_profileRepository.StorageDirectory, "perfiles");
+
+    private void OpenFolder(string path, string what)
     {
         try
         {
-            System.IO.Directory.CreateDirectory(RotatingFileLogSink.DefaultDirectory);
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = RotatingFileLogSink.DefaultDirectory,
-                UseShellExecute = true
-            });
+            System.IO.Directory.CreateDirectory(path);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
         catch (Exception ex)
         {
-            VortexLog.Warn("UI", "No se pudo abrir la carpeta de logs.", ex);
+            VortexLog.Warn("UI", $"No se pudo abrir la carpeta de {what}.", ex);
+            ShowMessage($"No se pudo abrir la carpeta: {path}", StatusSeverity.Warning);
         }
     }
 
@@ -300,7 +708,7 @@ public partial class MainWindow : Window
                 _hidHideService.RestorePhysicalDevice();
         });
 
-        TxtHidHideStatus.Text = _hidHideService.StatusText;
+        UpdateDriverStatus();
     }
 
     /// <summary>VortexPad icon from the exe (also works when published as a single file).</summary>
@@ -328,17 +736,20 @@ public partial class MainWindow : Window
         {
             _trayIcon = new WinForms.NotifyIcon
             {
-                Text = "VortexPad — 1000Hz Controller Engine",
+                Text = "VortexPad",
                 Icon = LoadAppIcon(),
                 Visible = true
             };
 
             var menu = new WinForms.ContextMenuStrip();
             menu.Items.Add("Mostrar VortexPad", null, (_, _) => Dispatcher.Invoke(ShowFromTray));
+            menu.Items.Add("Iniciar o detener la emulación", null, (_, _) => Dispatcher.Invoke(() => BtnToggleEngine_Click(BtnToggleEngine, new RoutedEventArgs())));
             menu.Items.Add("-");
-            menu.Items.Add("Perfil: Xbox (Standard / Series)", null, (_, _) => Dispatcher.Invoke(() => SelectPresetById(BuiltInPresets.XboxStandardId)));
-            menu.Items.Add("Perfil: PS5 / PlayStation (DualSense)", null, (_, _) => Dispatcher.Invoke(() => SelectPresetById(BuiltInPresets.Ps5DualSenseId)));
-            menu.Items.Add("Perfil: AI Smart Profile", null, (_, _) => Dispatcher.Invoke(() => SelectPresetById(BuiltInPresets.AiSmartProfileId)));
+            foreach (var presetId in new[] { BuiltInPresets.XboxStandardId, BuiltInPresets.Ps5DualSenseId, BuiltInPresets.AiSmartProfileId })
+            {
+                string name = _profiles.FirstOrDefault(p => p.Id == presetId)?.Name ?? presetId;
+                menu.Items.Add($"Perfil: {name}", null, (_, _) => Dispatcher.Invoke(() => SelectPresetById(presetId)));
+            }
             menu.Items.Add("-");
             menu.Items.Add("Salir", null, (_, _) => Dispatcher.Invoke(Close));
 
@@ -352,6 +763,8 @@ public partial class MainWindow : Window
             VortexLog.Warn("UI", "No se pudo crear el icono de la bandeja del sistema.", ex);
         }
     }
+
+    // ---------------- Devices ----------------
 
     private async Task RefreshDevicesListAsync()
     {
@@ -399,13 +812,15 @@ public partial class MainWindow : Window
             if (!wasMissing)
             {
                 VortexLog.Warn("HotPlug", $"Se desconectó '{previous?.DisplayName}'; esperando a que vuelva.");
-                TxtFooterStatus.Text = $"Mando desconectado: {device.DisplayName}. Se retomará solo al reconectarlo.";
             }
             _selectedDeviceMissing = true;
+            RefreshNotices();
+            UpdateDeviceUi();
             return;
         }
 
         _selectedDeviceMissing = false;
+        RefreshNotices();
 
         if (!sameDevice || device is not { IsNativeHid: true })
         {
@@ -423,8 +838,10 @@ public partial class MainWindow : Window
         if (wasMissing && sameDevice)
         {
             VortexLog.Info("HotPlug", $"'{device!.DisplayName}' se reconectó.");
-            TxtFooterStatus.Text = $"Mando reconectado: {device.DisplayName}.";
+            ShowMessage($"{device.DisplayName} se volvió a conectar.", StatusSeverity.Ok);
         }
+
+        UpdateDeviceUi();
 
         // Hide the new controller (or the reconnected one: its instance ID may change between USB and BT)
         if (_pollingLoop.IsRunning && (!sameDevice || wasMissing))
@@ -433,12 +850,116 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Empty state of the live panel and the DualSense section, depending on the selected controller.</summary>
+    private void UpdateDeviceUi()
+    {
+        var device = _selectedDevice;
+        bool demo = ChkDemoSignal.IsChecked == true;
+        LiveEmpty.Visibility = device == null && !demo ? Visibility.Visible : Visibility.Collapsed;
+        _navigation.DualSenseAvailable = device is { IsNativeDualSense: true, IsDisconnectedPlaceholder: false };
+    }
+
+    private void BtnDeviceHelp_Click(object sender, RoutedEventArgs e)
+    {
+        ShowMessage("Comprueba el cable o el emparejamiento Bluetooth y pulsa «Buscar mandos». " +
+                    "Si sigue sin aparecer, activa la señal de prueba en Ajustes › Diagnóstico para revisar el resto de la app.",
+            StatusSeverity.Info);
+    }
+
+    // ---------------- Profiles ----------------
+
+    /// <summary>Groups "Mis perfiles" / "Presets incluidos" in the profile list.</summary>
+    private sealed class ProfileGroupConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+            value is true ? "PRESETS INCLUIDOS" : "MIS PERFILES";
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+            throw new NotSupportedException();
+    }
+
     private void RefreshProfilesList()
     {
         _gameWatcher.MonitoredProfiles = _profiles;
-        LstProfiles.ItemsSource = null;
-        LstProfiles.ItemsSource = _profiles;
-        LstProfiles.SelectedItem = _activeProfile;
+
+        _profilesView = new ListCollectionView(_profiles)
+        {
+            Filter = o => o is ControllerProfile p && MatchesSearch(p)
+        };
+        _profilesView.SortDescriptions.Add(new SortDescription(nameof(ControllerProfile.IsBuiltInPreset), ListSortDirection.Ascending));
+        _profilesView.SortDescriptions.Add(new SortDescription(nameof(ControllerProfile.Name), ListSortDirection.Ascending));
+        _profilesView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ControllerProfile.IsBuiltInPreset), new ProfileGroupConverter()));
+
+        var quickView = new ListCollectionView(_profiles);
+        quickView.SortDescriptions.Add(new SortDescription(nameof(ControllerProfile.IsBuiltInPreset), ListSortDirection.Ascending));
+        quickView.SortDescriptions.Add(new SortDescription(nameof(ControllerProfile.Name), ListSortDirection.Ascending));
+
+        _syncingProfileSelection = true;
+        try
+        {
+            LstProfiles.ItemsSource = _profilesView;
+            CmbProfileQuick.ItemsSource = quickView;
+            LstProfiles.SelectedItem = _activeProfile;
+            CmbProfileQuick.SelectedItem = _activeProfile;
+        }
+        finally
+        {
+            _syncingProfileSelection = false;
+        }
+    }
+
+    private bool MatchesSearch(ControllerProfile profile)
+    {
+        string query = TxtProfileSearch?.Text?.Trim() ?? string.Empty;
+        return query.Length == 0
+               || profile.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+               || profile.LinkedProcessNames.Any(n => n.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+    }
+
+    private void TxtProfileSearch_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_profilesView == null) return;
+        _syncingProfileSelection = true;
+        try
+        {
+            _profilesView.Refresh();
+            LstProfiles.SelectedItem = _activeProfile;
+        }
+        finally
+        {
+            _syncingProfileSelection = false;
+        }
+    }
+
+    /// <summary>
+    /// Single entry point to switch the active profile (list, quick selector, Ctrl+Tab, auto-switch, tray).
+    /// Saves the pending edits of the previous one first.
+    /// </summary>
+    private void ActivateProfile(ControllerProfile profile)
+    {
+        if (!ReferenceEquals(profile, _activeProfile))
+        {
+            _autosaver.Flush();
+            LoadProfileIntoUi(profile);
+            _appSettings.RememberProfile(profile.Id);
+            if (_pollingLoop.IsRunning)
+            {
+                _vigemService.StartVirtualController(_activeProfile.TargetControllerType);
+                _pollingLoop.TargetHz = _activeProfile.PollingRateHz;
+            }
+            UpdateDriverStatus();
+        }
+
+        _syncingProfileSelection = true;
+        try
+        {
+            LstProfiles.SelectedItem = profile;
+            CmbProfileQuick.SelectedItem = profile;
+        }
+        finally
+        {
+            _syncingProfileSelection = false;
+        }
     }
 
     private void LoadProfileIntoUi(ControllerProfile profile)
@@ -449,7 +970,6 @@ public partial class MainWindow : Window
             _activeProfile = profile;
             _profileEditor.Load(profile); // the editor edits this same instance
             RefreshProfileHeader();
-            BtnDeleteProfile.Content = profile.IsBuiltInPreset ? "↺ Restablecer" : "🗑 Eliminar";
         }
         finally
         {
@@ -459,29 +979,42 @@ public partial class MainWindow : Window
         PublishRuntimeProfile();
         PublishFeedbackSettings();
         RefreshNotices();
+        UpdateEngineUi();
     }
 
-    /// <summary>Profile header in the center column (name, description, LED, deadzone circles).</summary>
+    /// <summary>Everything outside the editor that depends on the profile (deadzone circles, button labels…).</summary>
     private void RefreshProfileHeader()
     {
-        TxtActiveProfileTitle.Text = $"Perfil Activo: {_activeProfile.Name}";
-        TxtActiveProfileDesc.Text = _activeProfile.Description;
+        var p = _activeProfile;
+        TxtSticksSub.Text = string.Format(CultureInfo.CurrentCulture, "Zona muerta {0:F1} % · {1:F1} %",
+            p.LeftStick.InnerDeadzone * 100, p.RightStick.InnerDeadzone * 100);
         UpdateDeadzoneCircles();
 
-        try
-        {
-            var color = (Color)ColorConverter.ConvertFromString(_activeProfile.LightbarHex);
-            BdLightbarPreview.Background = new SolidColorBrush(color);
-        }
-        catch
-        {
-            BdLightbarPreview.Background = new SolidColorBrush(Color.FromRgb(0, 229, 255));
-        }
+        bool sony = p.TargetControllerType == VirtualControllerType.DualShock4;
+        LblBtnSouth.Text = sony ? "Cruz" : "A";
+        LblBtnEast.Text = sony ? "Círculo" : "B";
+        LblBtnWest.Text = sony ? "Cuadrado" : "X";
+        LblBtnNorth.Text = sony ? "Triángulo" : "Y";
+        LblBtnLB.Text = sony ? "L1" : "LB";
+        LblBtnRB.Text = sony ? "R1" : "RB";
+        LblBtnBack.Text = sony ? "Share" : "View";
+        LblBtnStart.Text = sony ? "Options" : "Menu";
+        LblBtnGuide.Text = sony ? "PS" : "Guía";
+        TxtL2Label.Text = sony ? "Izquierdo · L2" : "Izquierdo · LT";
+        TxtR2Label.Text = sony ? "Derecho · R2" : "Derecho · RT";
+        if (p.RightTrigger.HairTriggerMode)
+            TxtR2Label.Text += string.Format(CultureInfo.CurrentCulture, " · disparo rápido al {0:F0} %", p.RightTrigger.HairTriggerThreshold * 100);
+
+        TxtDeleteProfileIcon.Text = p.IsBuiltInPreset ? "" : "";
+        TxtDeleteProfileLabel.Text = p.IsBuiltInPreset ? "Restablecer" : "Borrar";
+        BtnDeleteProfile.ToolTip = p.IsBuiltInPreset
+            ? "Vuelve a los valores de fábrica de este preset"
+            : "Borra el perfil y su archivo";
     }
 
     /// <summary>
-    /// Any change in the editor: publishes the snapshot to the loop and applies what needs action
-    /// outside the profile (virtual controller type, HidHide, vibration/LED, profile list).
+    /// Any change in the editor: publishes the snapshot to the loop, schedules the autosave and applies what
+    /// needs action outside the profile (virtual controller type, HidHide, polling, lists).
     /// </summary>
     private async void OnProfileEdited(string what)
     {
@@ -489,6 +1022,7 @@ public partial class MainWindow : Window
 
         PublishRuntimeProfile();
         RefreshProfileHeader();
+        _autosaver.MarkDirty();
 
         // Vibration, LED and adaptive triggers: cheap, and the reader only resends if the result changed
         PublishFeedbackSettings();
@@ -497,7 +1031,9 @@ public partial class MainWindow : Window
         switch (what)
         {
             case nameof(ProfileEditorViewModel.Name):
-                LstProfiles.Items.Refresh();
+                _profilesView?.Refresh();
+                (CmbProfileQuick.ItemsSource as ListCollectionView)?.Refresh();
+                ActivateProfile(_activeProfile); // keeps both selectors on it after re-sorting
                 break;
 
             case nameof(ProfileEditorViewModel.TargetControllerType):
@@ -505,12 +1041,13 @@ public partial class MainWindow : Window
                 {
                     var type = _activeProfile.TargetControllerType;
                     await Task.Run(() => _vigemService.StartVirtualController(type));
-                    TxtVigemStatus.Text = _vigemService.StatusMessage;
                 }
+                UpdateDriverStatus();
                 break;
 
             case nameof(ProfileEditorViewModel.HidePhysicalControllerWithHidHide):
                 if (_pollingLoop.IsRunning) await ApplyHidHideAsync();
+                UpdateDriverStatus();
                 break;
 
             case nameof(ProfileEditorViewModel.PollingRateHz):
@@ -559,18 +1096,26 @@ public partial class MainWindow : Window
         _inputProvider.SetOutput(output);
     }
 
+    // ---------------- Engine ----------------
+
     private async Task StartEmulationEngineAsync()
     {
         var targetType = _activeProfile.TargetControllerType;
         int hz = _activeProfile.PollingRateHz;
 
-        await Task.Run(() => _vigemService.StartVirtualController(targetType));
-        await ApplyHidHideAsync();
-        _pollingLoop.Start(hz);
-
-        TxtVigemStatus.Text = _vigemService.StatusMessage;
-        BtnToggleEngine.Content = "⏹ Detener Emulación";
-        TxtFooterStatus.Text = $"Emulación activa ({_activeProfile.Name}) a {_activeProfile.PollingRateHz} Hz.";
+        BtnToggleEngine.IsEnabled = false;
+        TxtEngineLabel.Text = "Iniciando…";
+        try
+        {
+            await Task.Run(() => _vigemService.StartVirtualController(targetType));
+            await ApplyHidHideAsync();
+            _pollingLoop.Start(hz);
+        }
+        finally
+        {
+            UpdateEngineUi();
+            UpdateDriverStatus();
+        }
     }
 
     private void StopEmulationEngine()
@@ -584,10 +1129,11 @@ public partial class MainWindow : Window
         _lastGameFeedback = null;
         PushPhysicalOutput();
 
-        TxtVigemStatus.Text = "Detenido";
-        TxtHidHideStatus.Text = _hidHideService.StatusText;
-        BtnToggleEngine.Content = "▶ Iniciar Emulación 1000Hz";
-        TxtFooterStatus.Text = "Emulación detenida. Mando físico restaurado.";
+        TxtPollingHz.Text = "—";
+        TxtLatencyJitter.Text = "—";
+        UpdateEngineUi();
+        UpdateDriverStatus();
+        ShowMessage("Emulación detenida. El mando físico vuelve a estar visible.", StatusSeverity.Info);
     }
 
     private void OnHighPrecisionTick(double deltaSeconds)
@@ -606,6 +1152,7 @@ public partial class MainWindow : Window
         _virtualFrames.Publish();
     }
 
+    /// <summary>UI timer (60 Hz): only the visible section is updated.</summary>
     private void UpdateLiveVisualizerUi()
     {
         UpdateCalibrationUi();
@@ -613,29 +1160,37 @@ public partial class MainWindow : Window
         var raw = _latestPhysical;
         var outState = _virtualFrames.ReadLatest();
 
-        // Triggers
-        BarL2.Value = outState.L2;
-        BarR2.Value = outState.R2;
-        TxtL2Value.Text = $"{outState.L2 * 100:F0}%";
-        TxtR2Value.Text = $"{outState.R2 * 100:F0}%";
-
-        // Left Stick Radar (Canvas 170x170, center = 85, radius = 80)
-        PositionDot(DotLeftRaw, 85 + (raw.LX * 80), 85 - (raw.LY * 80), 8);
-        PositionDot(DotLeftOut, 85 + (outState.LX * 80), 85 - (outState.LY * 80), 12);
-        TxtLeftStickCoords.Text = $"Raw: ({raw.LX:F2}, {raw.LY:F2}) → Out: ({outState.LX:F2}, {outState.LY:F2})";
-
-        // Right Stick Radar
-        PositionDot(DotRightRaw, 85 + (raw.RX * 80), 85 - (raw.RY * 80), 8);
-        PositionDot(DotRightOut, 85 + (outState.RX * 80), 85 - (outState.RY * 80), 12);
-        TxtRightStickCoords.Text = $"Raw: ({raw.RX:F2}, {raw.RY:F2}) → Out: ({outState.RX:F2}, {outState.RY:F2})";
-
-        // Live point on the editor's curve, for the stick that is shown there
+        // Live point on the curve, for the stick shown in the editor
         bool left = _profileEditor.CurveStickIndex == 0;
         double rx = left ? raw.LX : raw.RX, ry = left ? raw.LY : raw.RY;
         double ox = left ? outState.LX : outState.RX, oy = left ? outState.LY : outState.RY;
-        ProfileEditor.UpdateLiveDot(Math.Sqrt((rx * rx) + (ry * ry)), Math.Sqrt((ox * ox) + (oy * oy)));
+        double rawMag = Math.Sqrt((rx * rx) + (ry * ry)), outMag = Math.Sqrt((ox * ox) + (oy * oy));
 
-        // Button pills highlight
+        if (SecSticks.Visibility == Visibility.Visible)
+        {
+            EditorSticks.UpdateLiveDot(rawMag, outMag);
+            return;
+        }
+        if (SecLive.Visibility != Visibility.Visible) return;
+
+        LiveCurve.UpdateLiveDot(rawMag, outMag);
+
+        // Triggers
+        BarL2.Value = outState.L2;
+        BarR2.Value = outState.R2;
+        TxtL2Value.Text = $"{outState.L2 * 100:F0} %";
+        TxtR2Value.Text = $"{outState.R2 * 100:F0} %";
+
+        // Stick radars (Canvas 170x170, center = 85, radius = 80)
+        PositionDot(DotLeftRaw, 85 + (raw.LX * 80), 85 - (raw.LY * 80), 8);
+        PositionDot(DotLeftOut, 85 + (outState.LX * 80), 85 - (outState.LY * 80), 12);
+        TxtLeftStickCoords.Text = FormatCoords(raw.LX, raw.LY, outState.LX, outState.LY);
+
+        PositionDot(DotRightRaw, 85 + (raw.RX * 80), 85 - (raw.RY * 80), 8);
+        PositionDot(DotRightOut, 85 + (outState.RX * 80), 85 - (outState.RY * 80), 12);
+        TxtRightStickCoords.Text = FormatCoords(raw.RX, raw.RY, outState.RX, outState.RY);
+
+        // Button matrix
         SetPillState(PillBtnSouth, outState.IsButtonActive(ControllerButton.South));
         SetPillState(PillBtnEast, outState.IsButtonActive(ControllerButton.East));
         SetPillState(PillBtnWest, outState.IsButtonActive(ControllerButton.West));
@@ -650,7 +1205,18 @@ public partial class MainWindow : Window
         SetPillState(PillBtnR3, outState.IsButtonActive(ControllerButton.RightThumb));
 
         // Gyro telemetry
-        TxtGyroTelemetry.Text = $"Gyro: {raw.GyroYaw:F1}°/s | Mouse Δ: ({outState.MouseDeltaX:F1}, {outState.MouseDeltaY:F1})";
+        TxtGyroTelemetry.Text = string.Format(CultureInfo.CurrentCulture, "Giro {0:F1} °/s · ratón Δ {1:F1}, {2:F1}",
+            raw.GyroYaw, outState.MouseDeltaX, outState.MouseDeltaY);
+    }
+
+    private static string FormatCoords(double rx, double ry, double ox, double oy) =>
+        $"{Signed(rx)} {Signed(ry)} → {Signed(ox)} {Signed(oy)}";
+
+    /// <summary>"+0,42" / "−0,35" with a real minus sign; values that round to zero show as "+0,00".</summary>
+    private static string Signed(double value)
+    {
+        double rounded = Math.Round(value, 2);
+        return (rounded < 0 ? "−" : "+") + Math.Abs(rounded).ToString("0.00", CultureInfo.CurrentCulture);
     }
 
     private static void PositionDot(UIElement dot, double centerX, double centerY, double size)
@@ -659,17 +1225,12 @@ public partial class MainWindow : Window
         Canvas.SetTop(dot, centerY - (size * 0.5));
     }
 
-    private static void SetPillState(Border pill, bool active)
+    private void SetPillState(Border pill, bool active)
     {
-        pill.Background = active
-            ? new SolidColorBrush(Color.FromRgb(0, 229, 255))
-            : new SolidColorBrush(Color.FromRgb(30, 41, 59));
-        if (pill.Child is TextBlock tb)
-        {
-            tb.Foreground = active
-                ? new SolidColorBrush(Color.FromRgb(6, 16, 24))
-                : new SolidColorBrush(Color.FromRgb(241, 245, 249));
-        }
+        var background = active ? _pillOn : _pillOff;
+        if (ReferenceEquals(pill.Background, background)) return;
+        pill.Background = background;
+        if (pill.Child is TextBlock tb) tb.Foreground = active ? _pillTextOn : _pillTextOff;
     }
 
     private void UpdateDeadzoneCircles()
@@ -690,21 +1251,14 @@ public partial class MainWindow : Window
     private void SelectPresetById(string presetId)
     {
         var found = _profiles.FirstOrDefault(p => p.Id == presetId);
-        if (found != null)
-        {
-            LstProfiles.SelectedItem = found;
-        }
+        if (found != null) ActivateProfile(found);
     }
-
-    private void BtnPresetXbox_Click(object sender, RoutedEventArgs e) => SelectPresetById(BuiltInPresets.XboxStandardId);
-    private void BtnPresetPs5_Click(object sender, RoutedEventArgs e) => SelectPresetById(BuiltInPresets.Ps5DualSenseId);
-    private void BtnPresetAi_Click(object sender, RoutedEventArgs e) => SelectPresetById(BuiltInPresets.AiSmartProfileId);
 
     private async void BtnToggleEngine_Click(object sender, RoutedEventArgs e)
     {
         if (_pollingLoop.IsRunning)
             StopEmulationEngine();
-        else
+        else if (BtnToggleEngine.IsEnabled)
             await StartEmulationEngineAsync();
     }
 
@@ -712,11 +1266,14 @@ public partial class MainWindow : Window
     {
         if (_inputProvider == null || ChkDemoSignal == null) return;
         _inputProvider.EnableInteractiveDemoSignal = ChkDemoSignal.IsChecked == true;
+        if (LiveEmpty != null) UpdateDeviceUi();
     }
 
     private async void BtnRefreshDevices_Click(object sender, RoutedEventArgs e)
     {
         await RefreshDevicesListAsync();
+        ShowMessage(_selectedDevice == null ? "No se encontró ningún mando." : $"Mando seleccionado: {_selectedDevice.DisplayName}.",
+            _selectedDevice == null ? StatusSeverity.Warning : StatusSeverity.Ok);
     }
 
     private async void CmbPhysicalDevices_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -727,32 +1284,32 @@ public partial class MainWindow : Window
 
     private void LstProfiles_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (LstProfiles.SelectedItem is ControllerProfile selected)
-        {
-            LoadProfileIntoUi(selected);
-            _appSettings.RememberProfile(selected.Id);
-            if (_pollingLoop.IsRunning)
-            {
-                _vigemService.StartVirtualController(_activeProfile.TargetControllerType);
-                TxtVigemStatus.Text = _vigemService.StatusMessage;
-            }
-        }
+        if (_syncingProfileSelection) return;
+        if (LstProfiles.SelectedItem is ControllerProfile selected) ActivateProfile(selected);
+    }
+
+    private void CmbProfileQuick_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingProfileSelection) return;
+        if (CmbProfileQuick.SelectedItem is ControllerProfile selected) ActivateProfile(selected);
+    }
+
+    private void BtnEditCurve_Click(object sender, RoutedEventArgs e)
+    {
+        _profileEditor.AnalogSelection = _profileEditor.CurveStickIndex;
+        Navigate(AppSection.Sticks);
     }
 
     private void BtnCloneProfile_Click(object sender, RoutedEventArgs e)
     {
+        _autosaver.Flush();
         var copy = _profileRepository.CloneProfile(_activeProfile);
         _profileRepository.SaveProfile(copy);
         _profiles.Add(copy);
         RefreshProfilesList();
-        LstProfiles.SelectedItem = copy;
-        TxtFooterStatus.Text = $"Perfil clonado y guardado: {copy.Name}";
-    }
-
-    private void BtnSaveProfile_Click(object sender, RoutedEventArgs e)
-    {
-        _profileRepository.SaveProfile(_activeProfile);
-        TxtFooterStatus.Text = $"Perfil '{_activeProfile.Name}' guardado en disco.";
+        ActivateProfile(copy);
+        Navigate(AppSection.Profiles);
+        ShowMessage($"Se creó «{copy.Name}». Edítalo aquí o en las secciones del editor.", StatusSeverity.Ok);
     }
 
     private void BtnExportProfile_Click(object sender, RoutedEventArgs e)
@@ -768,11 +1325,12 @@ public partial class MainWindow : Window
         try
         {
             ProfileRepository.ExportProfile(_activeProfile, dialog.FileName);
-            TxtFooterStatus.Text = $"Perfil '{_activeProfile.Name}' exportado a {dialog.FileName}.";
+            ShowMessage($"Perfil «{_activeProfile.Name}» exportado a {dialog.FileName}.", StatusSeverity.Ok);
         }
         catch (Exception ex)
         {
-            TxtFooterStatus.Text = $"No se pudo exportar: {ex.Message}";
+            VortexLog.Warn("Perfiles", "No se pudo exportar el perfil.", ex);
+            ShowMessage($"No se pudo exportar: {ex.Message}", StatusSeverity.Error);
         }
     }
 
@@ -791,12 +1349,13 @@ public partial class MainWindow : Window
             _profileRepository.SaveProfile(imported);
             _profiles.Add(imported);
             RefreshProfilesList();
-            LstProfiles.SelectedItem = imported;
-            TxtFooterStatus.Text = $"Perfil '{imported.Name}' importado y guardado.";
+            ActivateProfile(imported);
+            ShowMessage($"Perfil «{imported.Name}» importado.", StatusSeverity.Ok);
         }
         catch (Exception ex)
         {
-            TxtFooterStatus.Text = $"No se pudo importar: {ex.Message}";
+            VortexLog.Warn("Perfiles", "No se pudo importar el perfil.", ex);
+            ShowMessage($"No se pudo importar: {ex.Message}", StatusSeverity.Error);
         }
     }
 
@@ -806,13 +1365,15 @@ public partial class MainWindow : Window
         bool builtIn = profile.IsBuiltInPreset;
 
         string question = builtIn
-            ? $"¿Restablecer '{profile.Name}' a sus valores de fábrica? Se pierden tus cambios guardados de este preset."
-            : $"¿Eliminar el perfil '{profile.Name}'? Se borra su archivo y no se puede deshacer.";
-        if (MessageBox.Show(this, question, "VortexPad", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            ? $"¿Restablecer «{profile.Name}» a sus valores de fábrica? Se pierden tus cambios en este preset."
+            : $"¿Borrar «{profile.Name}»? Se borra su archivo y no se puede deshacer.";
+        string title = builtIn ? "Restablecer preset" : "Borrar perfil";
+        if (MessageBox.Show(this, question, title, MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK)
         {
             return;
         }
 
+        _autosaver.Flush(); // nothing pending may rewrite the file after deleting it
         _profileRepository.DeleteProfile(profile.Id);
 
         if (builtIn)
@@ -822,15 +1383,15 @@ public partial class MainWindow : Window
             int index = _profiles.IndexOf(profile);
             _profiles[index] = original;
             RefreshProfilesList();
-            LstProfiles.SelectedItem = original;
-            TxtFooterStatus.Text = $"Preset '{original.Name}' restablecido.";
+            ActivateProfile(original);
+            ShowMessage($"Preset «{original.Name}» restablecido.", StatusSeverity.Ok);
         }
         else
         {
             _profiles.Remove(profile);
             RefreshProfilesList();
-            LstProfiles.SelectedItem = _profiles.First();
-            TxtFooterStatus.Text = $"Perfil '{profile.Name}' eliminado.";
+            ActivateProfile(_profiles.First());
+            ShowMessage($"Perfil «{profile.Name}» borrado.", StatusSeverity.Ok);
         }
     }
 
@@ -839,6 +1400,8 @@ public partial class MainWindow : Window
         foreach (char c in System.IO.Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
         return string.IsNullOrWhiteSpace(name) ? "perfil" : name;
     }
+
+    // ---------------- Drift calibration ----------------
 
     private void BtnAiCalibrateDrift_Click(object sender, RoutedEventArgs e)
     {
@@ -852,10 +1415,11 @@ public partial class MainWindow : Window
         if (!_driftRecorder.Start()) return;
 
         _calibrationUiActive = true;
-        BtnAiCalibrateDrift.Content = "✖ Cancelar calibración";
-        BarCalibration.Value = 0;
+        TxtCalibrateLabel.Text = "Cancelar calibración";
+        CalibrationPanel.Visibility = Visibility.Visible;
         BarCalibration.Visibility = Visibility.Visible;
-        TxtAiCalibrationResult.Text = $"Midiendo reposo durante {_driftRecorder.DurationSeconds:F0} s: no toques los sticks…";
+        BarCalibration.Value = 0;
+        TxtAiCalibrationResult.Text = $"Midiendo el reposo durante {_driftRecorder.DurationSeconds:F0} s: no toques los sticks…";
         EnsureCalibrationSampler();
     }
 
@@ -903,29 +1467,32 @@ public partial class MainWindow : Window
         _calibrationUiActive = false;
         _calibrationSamplerCts?.Cancel();
         _calibrationSamplerCts = null;
-        BtnAiCalibrateDrift.Content = "🎯 Auto-Calibrar Drift y Deadzone";
+        TxtCalibrateLabel.Text = "Calibrar drift…";
         BarCalibration.Visibility = Visibility.Collapsed;
 
         string message;
+        StatusSeverity severity;
         switch (_driftRecorder.Status)
         {
             case DriftCalibrationStatus.Completed:
                 var result = _driftRecorder.BuildResult(_aiAssistant)!;
-                _activeProfile.LeftStick.InnerDeadzone = result.RecommendedLeftDeadzone;
-                _activeProfile.RightStick.InnerDeadzone = result.RecommendedRightDeadzone;
-                LoadProfileIntoUi(_activeProfile); // also publishes the snapshot to the loop
+                _profileEditor.LeftStick.InnerDeadzone = result.RecommendedLeftDeadzone;
+                _profileEditor.RightStick.InnerDeadzone = result.RecommendedRightDeadzone; // edits → publish + autosave
                 message = result.DiagnosticSummary;
+                severity = StatusSeverity.Ok;
                 break;
             case DriftCalibrationStatus.MovementDetected:
-                message = "Se detectó movimiento en un stick: suéltalos y vuelve a calibrar. No se cambió el perfil.";
+                message = "Se movió un stick durante la medición. Suéltalos y vuelve a calibrar; el perfil no cambió.";
+                severity = StatusSeverity.Warning;
                 break;
             default:
-                message = "Calibración cancelada. No se cambió el perfil.";
+                message = "Calibración cancelada. El perfil no cambió.";
+                severity = StatusSeverity.Info;
                 break;
         }
 
         TxtAiCalibrationResult.Text = message;
-        TxtFooterStatus.Text = message;
+        ShowMessage(message, severity);
     }
 
     private void BtnApplyAiGenre_Click(object sender, RoutedEventArgs e)
@@ -941,35 +1508,42 @@ public partial class MainWindow : Window
 
         string summary = _aiAssistant.ApplySmartTuning(_activeProfile, genre);
         LoadProfileIntoUi(_activeProfile);
-        TxtAiCalibrationResult.Text = summary;
-        TxtFooterStatus.Text = summary;
+        _autosaver.MarkDirty(); // the model was changed directly, not through the editor
+        TxtAiGenreResult.Text = summary;
+        ShowMessage("Ajuste automático aplicado al perfil.", StatusSeverity.Ok);
     }
 
-    private static readonly MacroDefinition UiComboMacro = new()
-    {
-        Id = "ui-combo-abxy",
-        Name = "Macro Combo A → B → X → Y",
-        TriggerButton = ControllerButton.None, // fired only from the UI
-        Steps =
-        {
-            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.South, DurationMs = 90 },
-            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.East, DurationMs = 90 },
-            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.West, DurationMs = 90 },
-            new MacroStep { StepType = MacroStepType.TapButton, Button = ControllerButton.North, DurationMs = 90 }
-        }
-    };
+    // ---------------- Test actions ----------------
 
-    private void BtnTriggerComboMacro_Click(object sender, RoutedEventArgs e)
+    /// <summary>Runs the selected macro once through the pipeline (a copy: the UI keeps editing the original).</summary>
+    private void OnTestMacroRequested(MacroViewModel macro)
     {
         if (!_pollingLoop.IsRunning)
         {
-            TxtFooterStatus.Text = "Inicia la emulación para ejecutar la macro.";
+            ShowMessage("Inicia la emulación (F5) para probar la macro.", StatusSeverity.Info);
             return;
         }
 
-        // Goes through the pipeline: the 1000 Hz loop runs it frame by frame, together with the physical input
-        _pipelineEngine.EnqueueMacro(UiComboMacro);
-        TxtFooterStatus.Text = "Macro Combo enviada al pipeline: A → B → X → Y.";
+        var source = macro.Model;
+        var copy = new MacroDefinition
+        {
+            Id = "ui-test-" + source.Id,
+            Name = source.Name,
+            TriggerButton = ControllerButton.None // fired only from the UI
+        };
+        foreach (var step in source.Steps)
+        {
+            copy.Steps.Add(new MacroStep
+            {
+                StepType = step.StepType,
+                Button = step.Button,
+                VirtualKeyCode = step.VirtualKeyCode,
+                DurationMs = step.DurationMs
+            });
+        }
+
+        _pipelineEngine.EnqueueMacro(copy);
+        ShowMessage($"Macro «{source.Name}» enviada al mando virtual.", StatusSeverity.Ok);
     }
 
     private async void BtnTestRumble_Click(object sender, RoutedEventArgs e)
@@ -986,17 +1560,21 @@ public partial class MainWindow : Window
         BarRumbleSmall.Value = 0;
         PushPhysicalOutput(); // back to the game's vibration (or off)
 
-        TxtFooterStatus.Text = _inputProvider.SupportsOutput
-            ? "Prueba de vibración enviada al mando físico."
-            : "El mando seleccionado no admite vibración (solo DualSense / DualShock 4 por HID nativo).";
+        if (_inputProvider.SupportsOutput)
+            ShowMessage("Prueba de vibración enviada al mando físico.", StatusSeverity.Ok);
+        else
+            ShowMessage("Este mando no admite vibración desde VortexPad (solo DualSense y DualShock 4 por HID nativo).", StatusSeverity.Info);
     }
+
+    // ---------------- Engine callbacks ----------------
 
     private void OnPollingTelemetryUpdated(PollingTelemetry telemetry)
     {
         Dispatcher.BeginInvoke(() =>
         {
-            TxtPollingHz.Text = $"{telemetry.ActualRateHz:F1} Hz";
-            TxtLatencyJitter.Text = $"{telemetry.LastTickDurationMicroseconds:F1} µs / {telemetry.AverageJitterMilliseconds:F3} ms";
+            TxtPollingHz.Text = string.Format(CultureInfo.CurrentCulture, "{0:F1} Hz", telemetry.ActualRateHz);
+            TxtLatencyJitter.Text = string.Format(CultureInfo.CurrentCulture, "{0:F1} µs · {1:F3} ms",
+                telemetry.LastTickDurationMicroseconds, telemetry.AverageJitterMilliseconds);
         });
     }
 
@@ -1018,20 +1596,22 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             TxtActiveProcess.Text = matchedProfile != null
-                ? $"{processName}.exe → [{matchedProfile.Name}]"
+                ? $"{processName}.exe → {matchedProfile.Name}"
                 : $"{processName}.exe";
 
             if (matchedProfile != null && matchedProfile.Id != _activeProfile.Id)
             {
-                LstProfiles.SelectedItem = matchedProfile;
-                TxtFooterStatus.Text = $"Auto-Switch activado por '{processName}.exe' → Perfil '{matchedProfile.Name}'";
+                ActivateProfile(matchedProfile);
+                ShowMessage($"Se activó «{matchedProfile.Name}» al abrir {processName}.exe.", StatusSeverity.Info);
             }
         });
     }
 
     private void OnMainWindowClosed(object? sender, EventArgs e)
     {
+        _autosaver.Flush(); // C1: never lose the last edits on close
         _uiRefreshTimer.Stop();
+        _messageTimer.Stop();
         _driftRecorder.Cancel();
         _calibrationSamplerCts?.Cancel();
         _gameWatcher.Dispose();

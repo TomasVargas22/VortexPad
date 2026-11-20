@@ -88,7 +88,7 @@ public static class BuiltInPresets
         {
             Id = Ps5DualSenseId,
             Name = "PS5 / PlayStation (DualSense → DS4/XInput)",
-            Description = "Mapeo nativo PlayStation (✕/○/□/△, L1/R1, L2/R2, Touchpad, botón PS), giroscopio hacia stick derecho al apuntar (L2) y vibración adaptada.",
+            Description = "Mapeo nativo PlayStation (Cruz, Círculo, Cuadrado y Triángulo, L1/R1, L2/R2, Touchpad, botón PS), giroscopio hacia stick derecho al apuntar (L2) y vibración adaptada.",
             Category = "PlayStation",
             IsBuiltInPreset = true,
             TargetControllerType = VirtualControllerType.DualShock4,
@@ -253,6 +253,9 @@ public sealed class ProfileRepository
             "VortexPad",
             "Profiles");
     }
+
+    /// <summary>Folder where the user's profiles are saved (one .json per profile).</summary>
+    public string StorageDirectory => _storageDirectory;
 
     public static string SerializeProfile(ControllerProfile profile)
         => JsonSerializer.Serialize(profile, JsonOptions);

@@ -2,368 +2,808 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:VortexPad.App.Views"
-        Title="VortexPad — 1000Hz Next-Gen Controller Remapper (Xbox / PS5 / AI)"
+        xmlns:vm="clr-namespace:VortexPad.ViewModels;assembly=VortexPad.ViewModels"
+        Title="VortexPad"
         Icon="Assets/vortexpad.ico"
         Width="1360" Height="840"
         MinWidth="1120" MinHeight="720"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BgPrimary}"
-        Foreground="{StaticResource TextPrimary}">
+        Background="{StaticResource Brush.Bg}"
+        Foreground="{StaticResource Brush.Text}"
+        FontFamily="{StaticResource Font.Sans}"
+        FontSize="{StaticResource FontSize.Body}"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        SizeChanged="Window_SizeChanged">
 
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-
-        <!-- TOP HEADER BAR -->
-        <Border Grid.Row="0" Background="{StaticResource BgCard}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="10" Padding="16,12" Margin="0,0,0,12">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-
-                <!-- Brand Title -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="38" Height="38" CornerRadius="8" Background="#00E5FF" Margin="0,0,12,0">
-                        <TextBlock Text="VP" Foreground="#061018" FontWeight="ExtraBold" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <StackPanel VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="VORTEXPAD" FontSize="20" FontWeight="ExtraBold" Foreground="#F8FAFC"/>
-                            <Border Background="#1E293B" BorderBrush="#00E5FF" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="1000Hz ENGINE" FontSize="10" FontWeight="Bold" Foreground="#00E5FF"/>
-                            </Border>
-                        </StackPanel>
-                        <TextBlock Text="DirectInput &amp; HID → Xbox 360 / DualShock 4 / PS5 / AI Auto-Calibration" FontSize="11.5" Foreground="{StaticResource TextSecondary}"/>
-                    </StackPanel>
-                </StackPanel>
-
-                <!-- Quick Built-in Preset Pills -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <TextBlock Text="Perfiles Rápidos:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" FontSize="12"/>
-                    <Button x:Name="BtnPresetXbox" Style="{StaticResource FluentButton}" Click="BtnPresetXbox_Click" Margin="0,0,6,0" Content="🎮 Xbox (Standard / Series)"/>
-                    <Button x:Name="BtnPresetPs5" Style="{StaticResource FluentButton}" Click="BtnPresetPs5_Click" Margin="0,0,6,0" Content="🔵 PS5 / PlayStation (DualSense)"/>
-                    <Button x:Name="BtnPresetAi" Style="{StaticResource FluentButton}" Click="BtnPresetAi_Click" Content="✨ AI Smart Profile (Auto)"/>
-                </StackPanel>
-
-                <!-- Engine Controls -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <CheckBox x:Name="ChkDemoSignal" Content="Simulador en Vivo" Foreground="#00E5FF" VerticalAlignment="Center" Margin="0,0,14,0" Checked="ChkDemoSignal_Changed" Unchecked="ChkDemoSignal_Changed"/>
-                    <Button x:Name="BtnToggleEngine" Style="{StaticResource PrimaryCyanButton}" Click="BtnToggleEngine_Click" Padding="16,8" Content="▶ Iniciar Emulación 1000Hz"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <StackPanel Grid.Row="1">
-        <!-- Notices: missing drivers / administrator permissions (DependencyNotices) -->
-        <ItemsControl x:Name="NoticesBar">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border x:Name="NoticeBorder" CornerRadius="8" Padding="12,6" Margin="0,0,0,8" BorderThickness="1"
-                            Background="#1A2433" BorderBrush="#334155">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right" Style="{StaticResource FluentButton}" Content="✕" Padding="8,2" Margin="6,0,0,0"
-                                    ToolTip="Ocultar este aviso" Tag="{Binding}" Click="NoticeDismiss_Click"/>
-                            <Button x:Name="NoticeActionButton" DockPanel.Dock="Right" Style="{StaticResource FluentButton}" Padding="10,2"
-                                    Content="{Binding ActionLabel}" Tag="{Binding}" Click="NoticeAction_Click"/>
-                            <TextBlock Text="{Binding Message}" Foreground="#F1F5F9" FontSize="11.5" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                        </DockPanel>
-                    </Border>
-                    <DataTemplate.Triggers>
-                        <DataTrigger Binding="{Binding Severity}" Value="Error">
-                            <Setter TargetName="NoticeBorder" Property="Background" Value="#3A1219"/>
-                            <Setter TargetName="NoticeBorder" Property="BorderBrush" Value="#F43F5E"/>
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding Severity}" Value="Warning">
-                            <Setter TargetName="NoticeBorder" Property="Background" Value="#3A2A0F"/>
-                            <Setter TargetName="NoticeBorder" Property="BorderBrush" Value="#F59E0B"/>
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding Action}" Value="None">
-                            <Setter TargetName="NoticeActionButton" Property="Visibility" Value="Collapsed"/>
-                        </DataTrigger>
-                    </DataTemplate.Triggers>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
-
-        <!-- TELEMETRY & DRIVER STATUS STRIP -->
-        <Border Background="#0F141E" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="14,8" Margin="0,0,0,12">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="1.3*"/>
-                    <ColumnDefinition Width="1.3*"/>
-                </Grid.ColumnDefinitions>
-
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock Text="Polling Real:" Foreground="{StaticResource TextSecondary}" Margin="0,0,6,0"/>
-                    <TextBlock x:Name="TxtPollingHz" Text="1000.0 Hz" Foreground="#10B981" FontWeight="Bold"/>
-                </StackPanel>
-
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <TextBlock Text="Latencia / Jitter:" Foreground="{StaticResource TextSecondary}" Margin="0,0,6,0"/>
-                    <TextBlock x:Name="TxtLatencyJitter" Text="4.2 µs / 0.015 ms" Foreground="#00E5FF" FontWeight="SemiBold"/>
-                </StackPanel>
-
-                <StackPanel Grid.Column="2" Orientation="Horizontal">
-                    <TextBlock Text="Proceso Activo:" Foreground="{StaticResource TextSecondary}" Margin="0,0,6,0"/>
-                    <TextBlock x:Name="TxtActiveProcess" Text="Ninguno (Auto-Switch listo)" Foreground="#E2E8F0" FontWeight="SemiBold"/>
-                </StackPanel>
-
-                <StackPanel Grid.Column="3" Orientation="Horizontal">
-                    <TextBlock Text="ViGEmBus:" Foreground="{StaticResource TextSecondary}" Margin="0,0,6,0"/>
-                    <TextBlock x:Name="TxtVigemStatus" Text="Listo" Foreground="#10B981" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
-
-                <StackPanel Grid.Column="4" Orientation="Horizontal">
-                    <TextBlock Text="HidHide:" Foreground="{StaticResource TextSecondary}" Margin="0,0,6,0"/>
-                    <TextBlock x:Name="TxtHidHideStatus" Text="Listo" Foreground="#A78BFA" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-        </StackPanel>
-
-        <!-- MAIN 3-COLUMN WORKSPACE -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="330"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="370"/>
-            </Grid.ColumnDefinitions>
-
-            <!-- LEFT COLUMN: DEVICES, PROFILES & AI CALIBRATION -->
-            <Border Grid.Column="0" Background="{StaticResource BgCard}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,0,12,0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <TextBlock Text="1. MANDO FÍSICO DE ENTRADA" FontSize="12" FontWeight="Bold" Foreground="#00E5FF" Margin="0,0,0,6"/>
-                        <Grid Margin="0,0,0,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <ComboBox x:Name="CmbPhysicalDevices" Grid.Column="0" SelectionChanged="CmbPhysicalDevices_SelectionChanged" Height="30" Margin="0,0,6,0"/>
-                            <Button Grid.Column="1" Style="{StaticResource FluentButton}" Click="BtnRefreshDevices_Click" Content="↻"/>
-                        </Grid>
-                        <TextBlock x:Name="TxtAiDeviceSignature" Text="AI Detector: Selecciona un dispositivo" FontSize="11" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,14"/>
-
-                        <Separator Background="{StaticResource BorderSubtle}" Margin="0,0,0,12"/>
-
-                        <TextBlock Text="2. GESTOR DE PERFILES" FontSize="12" FontWeight="Bold" Foreground="#00E5FF" Margin="0,0,0,6"/>
-                        <ListBox x:Name="LstProfiles" Height="130" Background="#0F141E" Foreground="#F1F5F9" BorderBrush="{StaticResource BorderSubtle}" SelectionChanged="LstProfiles_SelectionChanged" DisplayMemberPath="Name" Margin="0,0,0,8"/>
-
-                        <UniformGrid Columns="2" Margin="0,0,0,6">
-                            <Button Style="{StaticResource FluentButton}" Click="BtnCloneProfile_Click" Margin="0,0,4,0" Content="+ Clonar Perfil"/>
-                            <Button Style="{StaticResource FluentButton}" Click="BtnSaveProfile_Click" Margin="4,0,0,0" Content="💾 Guardar"/>
-                        </UniformGrid>
-                        <UniformGrid Columns="3" Margin="0,0,0,6">
-                            <Button Style="{StaticResource FluentButton}" Click="BtnImportProfile_Click" Margin="0,0,3,0" Padding="6,5" Content="📂 Importar"/>
-                            <Button Style="{StaticResource FluentButton}" Click="BtnExportProfile_Click" Margin="3,0,3,0" Padding="6,5" Content="📤 Exportar"/>
-                            <Button x:Name="BtnDeleteProfile" Style="{StaticResource FluentButton}" Click="BtnDeleteProfile_Click" Margin="3,0,0,0" Padding="6,5" Content="🗑 Eliminar"/>
-                        </UniformGrid>
-                        <TextBlock Text="Nombre, mando virtual, color, HidHide y auto-switch se editan en la pestaña General del editor."
-                                   FontSize="10.5" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,12"/>
-
-                        <Separator Background="{StaticResource BorderSubtle}" Margin="0,0,0,12"/>
-
-                        <!-- AI MODULE -->
-                        <Border Background="#18122B" BorderBrush="#9D4EDD" BorderThickness="1" CornerRadius="8" Padding="10">
-                            <StackPanel>
-                                <TextBlock Text="✨ VORTEXPAD AI ASSISTANT" FontSize="12" FontWeight="Bold" Foreground="#C77DFF" Margin="0,0,0,6"/>
-                                <Button x:Name="BtnAiCalibrateDrift" Style="{StaticResource FluentButton}" Click="BtnAiCalibrateDrift_Click" Margin="0,0,0,4" Content="🎯 Auto-Calibrar Drift y Deadzone"/>
-                                <ProgressBar x:Name="BarCalibration" Minimum="0" Maximum="1" Height="6" Foreground="#C77DFF" Background="#1E293B" Margin="0,0,0,8" Visibility="Collapsed"/>
-                                <TextBlock Text="Optimización AI por Género:" FontSize="11" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,4"/>
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <ComboBox x:Name="CmbAiGenre" Grid.Column="0" SelectedIndex="0" Height="28" Margin="0,0,6,0">
-                                        <ComboBoxItem Content="Competitive FPS (S-Curve + Gyro)"/>
-                                        <ComboBoxItem Content="Racing / Sim (Pedales Progresivos)"/>
-                                        <ComboBoxItem Content="Fighting / Arcade (Snap Axial)"/>
-                                        <ComboBoxItem Content="Soulslike / Action RPG"/>
-                                        <ComboBoxItem Content="General Action (Balanceado)"/>
-                                    </ComboBox>
-                                    <Button Grid.Column="1" Style="{StaticResource FluentButton}" Click="BtnApplyAiGenre_Click" Content="Aplicar"/>
-                                </Grid>
-                                <TextBlock x:Name="TxtAiCalibrationResult" Text="Listo para analizar ruido del sensor y sugerir curvas óptimas." FontSize="11" Foreground="#E0AAFF" TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Border>
-
-                        <Separator Background="{StaticResource BorderSubtle}" Margin="0,12,0,12"/>
-
-                        <!-- APP SETTINGS (settings.json, AppSettingsViewModel) -->
-                        <StackPanel x:Name="SettingsPanel">
-                            <TextBlock Text="3. AJUSTES DE LA APP" FontSize="12" FontWeight="Bold" Foreground="#00E5FF" Margin="0,0,0,6"/>
-                            <CheckBox Content="Cambiar de perfil según el juego activo" IsChecked="{Binding AutoSwitchEnabled}" Foreground="#E2E8F0" Margin="0,0,0,5"/>
-                            <CheckBox Content="Iniciar emulación al abrir VortexPad" IsChecked="{Binding StartEmulationOnLaunch}" Foreground="#E2E8F0" Margin="0,0,0,5"/>
-                            <CheckBox Content="Minimizar a la bandeja del sistema" IsChecked="{Binding MinimizeToTray}" Foreground="#E2E8F0" Margin="0,0,0,5"/>
-                            <CheckBox Content="Iniciar con Windows (minimizado)" IsChecked="{Binding StartWithWindows}" Foreground="#E2E8F0" Margin="0,0,0,8"/>
-                            <Button Style="{StaticResource FluentButton}" Click="BtnOpenLogs_Click" HorizontalAlignment="Left" Padding="8,4" FontSize="11" Content="📄 Abrir carpeta de logs"/>
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
+    <Window.Resources>
+        <!-- Aviso de dependencias (DependencyNotice) -->
+        <DataTemplate x:Key="NoticeTemplate">
+            <Border x:Name="Bd" CornerRadius="{StaticResource Radius.Md}" Padding="12,8" Margin="0,0,0,8"
+                    Background="{StaticResource Brush.InfoSoft}" BorderBrush="{StaticResource Brush.Info}" BorderThickness="3,0,0,0"
+                    AutomationProperties.LiveSetting="Polite">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Button.IconSmall}" Content="&#xE711;" Margin="8,0,0,0"
+                            ToolTip="Ocultar este aviso" AutomationProperties.Name="Ocultar este aviso" Tag="{Binding}" Click="NoticeDismiss_Click"/>
+                    <Button x:Name="Recheck" DockPanel.Dock="Right" Style="{StaticResource Button.GhostSmall}" Margin="8,0,0,0"
+                            Tag="{Binding}" Click="NoticeRecheck_Click" Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE72C;"/><TextBlock Text="Comprobar de nuevo"/></StackPanel>
+                    </Button>
+                    <Button x:Name="Action" DockPanel.Dock="Right" Style="{StaticResource Button.Small}"
+                            Content="{Binding ActionLabel}" Tag="{Binding}" Click="NoticeAction_Click"/>
+                    <TextBlock x:Name="Ico" DockPanel.Dock="Left" Style="{StaticResource Text.Icon}" Text="&#xE946;" Foreground="{StaticResource Brush.Info}"
+                               Margin="0,0,12,0"/>
+                    <TextBlock Text="{Binding Message}" Style="{StaticResource Text.Body}" VerticalAlignment="Center"/>
+                </DockPanel>
             </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Severity}" Value="Error">
+                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.DangerSoft}"/>
+                    <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brush.Danger}"/>
+                    <Setter TargetName="Ico" Property="Text" Value="&#xE783;"/>
+                    <Setter TargetName="Ico" Property="Foreground" Value="{StaticResource Brush.Danger}"/>
+                    <Setter TargetName="Bd" Property="AutomationProperties.LiveSetting" Value="Assertive"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Warning">
+                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.WarnSoft}"/>
+                    <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brush.Warn}"/>
+                    <Setter TargetName="Ico" Property="Text" Value="&#xE7BA;"/>
+                    <Setter TargetName="Ico" Property="Foreground" Value="{StaticResource Brush.Warn}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Action}" Value="None">
+                    <Setter TargetName="Action" Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Action}" Value="OpenUrl">
+                    <Setter TargetName="Recheck" Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
 
-            <!-- CENTER COLUMN: LIVE INTERACTIVE CONTROLLER VISUALIZER -->
-            <Border Grid.Column="1" Background="{StaticResource BgCard}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="10" Padding="16" Margin="0,0,12,0">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
+        <!-- Cabecera de sección: título + descripción a la izquierda, acciones a la derecha -->
+        <Style x:Key="SectionHeader" TargetType="DockPanel">
+            <Setter Property="Margin" Value="0,0,0,16"/>
+            <Setter Property="LastChildFill" Value="True"/>
+        </Style>
+        <Style x:Key="SectionScroll" TargetType="ScrollViewer">
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Visibility" Value="Collapsed"/>
+        </Style>
+        <Style x:Key="Legend" TargetType="Ellipse">
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="Height" Value="8"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="SettingRow" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{StaticResource Brush.Line}"/>
+            <Setter Property="BorderThickness" Value="0,1,0,0"/>
+            <Setter Property="Padding" Value="0,10"/>
+        </Style>
+        <Style x:Key="Kbd" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Brush.Surface2}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Brush.LineControl}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="6,1"/>
+            <Setter Property="Margin" Value="4,0,0,0"/>
+        </Style>
+    </Window.Resources>
 
-                    <!-- Title & Active Preset Description -->
-                    <StackPanel Grid.Row="0" Margin="0,0,0,12">
-                        <Grid>
-                            <TextBlock x:Name="TxtActiveProfileTitle" Text="Perfil Activo: Xbox (Standard / Series)" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC"/>
-                            <Border x:Name="BdLightbarPreview" HorizontalAlignment="Right" Width="95" Height="22" CornerRadius="11" Background="#00E5FF" BorderBrush="#FFFFFF" BorderThickness="1">
-                                <TextBlock Text="LED LIGHTBAR" FontSize="9" FontWeight="Bold" Foreground="#04080E" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ================= RIEL DE NAVEGACIÓN ================= -->
+        <Border x:Name="Rail" Grid.Column="0" Width="{StaticResource Size.NavW}" Background="{StaticResource Brush.Surface}"
+                BorderBrush="{StaticResource Brush.LineStrong}" BorderThickness="0,0,1,0" Padding="12,12,12,12">
+            <DockPanel>
+                <StackPanel x:Name="Brand" DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,0,0,12" Height="40">
+                    <Image Source="Assets/vortexpad.ico" Width="32" Height="32" AutomationProperties.Name="VortexPad"/>
+                    <TextBlock x:Name="TxtBrand" Text="VortexPad" Style="{StaticResource Text.Heading}" FontSize="16" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel x:Name="NavBottom" DockPanel.Dock="Bottom" Tag="Expanded">
+                    <RadioButton x:Name="NavSettings" Style="{StaticResource NavItem}" Tag="&#xE713;" Content="Ajustes" Checked="Nav_Click"
+                                 ToolTip="Ajustes · Ctrl+5" AutomationProperties.Name="Ajustes"/>
+                    <Button x:Name="BtnToggleRail" Style="{StaticResource Button.Icon}" HorizontalAlignment="Left" Margin="4,4,0,0"
+                            Content="&#xE76B;" Click="BtnToggleRail_Click" ToolTip="Contraer el menú · Ctrl+B" AutomationProperties.Name="Contraer el menú"/>
+                </StackPanel>
+
+                <StackPanel x:Name="NavItems" Tag="Expanded" KeyboardNavigation.DirectionalNavigation="Cycle">
+                    <RadioButton x:Name="NavLive" Style="{StaticResource NavItem}" Tag="&#xE9D2;" Content="Panel en vivo" Checked="Nav_Click" IsChecked="True"
+                                 ToolTip="Panel en vivo · Ctrl+1" AutomationProperties.Name="Panel en vivo"/>
+                    <RadioButton x:Name="NavProfiles" Style="{StaticResource NavItem}" Tag="&#xE77B;" Content="Perfiles" Checked="Nav_Click"
+                                 ToolTip="Perfiles · Ctrl+2" AutomationProperties.Name="Perfiles"/>
+                    <TextBlock x:Name="GroupEditor" Style="{StaticResource NavGroup}" Text="EDITOR"/>
+                    <RadioButton x:Name="NavSticks" Style="{StaticResource NavItem}" Tag="&#xE879;" Content="Sticks y gatillos" Checked="Nav_Click"
+                                 ToolTip="Sticks y gatillos · Ctrl+3" AutomationProperties.Name="Sticks y gatillos"/>
+                    <RadioButton x:Name="NavButtons" Style="{StaticResource NavItem}" Tag="&#xE8B9;" Content="Botones y capas" Checked="Nav_Click"
+                                 ToolTip="Botones y capas" AutomationProperties.Name="Botones y capas"/>
+                    <RadioButton x:Name="NavGyro" Style="{StaticResource NavItem}" Tag="&#xE7B3;" Content="Giroscopio" Checked="Nav_Click"
+                                 ToolTip="Giroscopio" AutomationProperties.Name="Giroscopio"/>
+                    <RadioButton x:Name="NavFeedback" Style="{StaticResource NavItem}" Tag="&#xE877;" Content="Vibración y luz" Checked="Nav_Click"
+                                 ToolTip="Vibración y luz" AutomationProperties.Name="Vibración y luz"/>
+                    <RadioButton x:Name="NavMacros" Style="{StaticResource NavItem}" Tag="&#xE945;" Content="Macros y turbo" Checked="Nav_Click"
+                                 ToolTip="Macros y turbo · Ctrl+4" AutomationProperties.Name="Macros y turbo"/>
+                    <RadioButton x:Name="NavDualSense" Style="{StaticResource NavItem}" Tag="&#xE7FC;" Content="DualSense" Checked="Nav_Click"
+                                 ToolTip="DualSense: touchpad y gatillos adaptativos" AutomationProperties.Name="DualSense" Visibility="Collapsed"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ================= COLUMNA PRINCIPAL ================= -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="56"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- ===== Barra de estado ===== -->
+            <Border x:Name="StatusBar" Grid.Row="0" Background="{StaticResource Brush.Surface}" BorderBrush="{StaticResource Brush.LineStrong}"
+                    BorderThickness="0,0,0,1" Padding="24,0">
+                <Grid x:Name="StatusGrid">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <ComboBox x:Name="CmbPhysicalDevices" Grid.Column="0" Width="240" VerticalAlignment="Center" Margin="0,0,16,0"
+                              SelectionChanged="CmbPhysicalDevices_SelectionChanged"
+                              ToolTip="Mando físico" AutomationProperties.Name="Mando físico"/>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" ClipToBounds="True">
+                        <ContentControl x:Name="ChipEmulation" Focusable="False" Margin="0,0,8,0"/>
+                        <ItemsControl x:Name="ChipsPanel" Focusable="False">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,8,0"/></Style>
+                            </ItemsControl.ItemContainerStyle>
+                        </ItemsControl>
+                        <!-- Por debajo de 1280 px: un chip resumen que despliega los tres -->
+                        <ToggleButton x:Name="ChipSummary" Visibility="Collapsed" Cursor="Hand" FocusVisualStyle="{StaticResource FocusVisual}"
+                                      AutomationProperties.Name="Estado de los controladores. Ver detalles">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <ContentPresenter/>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                            <ContentControl x:Name="ChipSummaryContent" Focusable="False"/>
+                        </ToggleButton>
+                        <Popup x:Name="ChipSummaryPopup" PlacementTarget="{Binding ElementName=ChipSummary}" Placement="Bottom" VerticalOffset="8"
+                               StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade"
+                               IsOpen="{Binding IsChecked, ElementName=ChipSummary, Mode=TwoWay}">
+                            <Border Background="{StaticResource Brush.Surface2}" BorderBrush="{StaticResource Brush.LineStrong}" BorderThickness="1"
+                                    CornerRadius="{StaticResource Radius.Md}" Padding="12">
+                                <ItemsControl x:Name="ChipsPopupList" Focusable="False">
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter"><Setter Property="Margin" Value="0,0,0,8"/></Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                </ItemsControl>
                             </Border>
-                        </Grid>
-                        <TextBlock x:Name="TxtActiveProfileDesc" Text="Descripción del perfil..." FontSize="11.5" Foreground="{StaticResource TextSecondary}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        </Popup>
                     </StackPanel>
 
-                    <!-- Triggers L2 / R2 Live Bars -->
-                    <UniformGrid Grid.Row="1" Columns="2" Margin="0,0,0,14">
-                        <Border Background="#0F141E" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,6,0">
-                            <StackPanel>
-                                <DockPanel Margin="0,0,0,4">
-                                    <TextBlock Text="GATILLO IZQUIERDO (LT / L2)" FontSize="11" FontWeight="Bold" Foreground="#94A3B8"/>
-                                    <TextBlock x:Name="TxtL2Value" Text="0%" FontSize="11" FontWeight="Bold" Foreground="#00E5FF" HorizontalAlignment="Right"/>
-                                </DockPanel>
-                                <ProgressBar x:Name="BarL2" Minimum="0" Maximum="1" Height="12" Foreground="#00E5FF" Background="#1E293B"/>
-                            </StackPanel>
-                        </Border>
+                    <ComboBox x:Name="CmbProfileQuick" Grid.Column="2" Width="220" VerticalAlignment="Center" Margin="16,0,12,0"
+                              DisplayMemberPath="Name" SelectionChanged="CmbProfileQuick_SelectionChanged"
+                              ToolTip="Perfil activo · Ctrl+Tab para el siguiente" AutomationProperties.Name="Perfil activo"/>
 
-                        <Border Background="#0F141E" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="6,0,0,0">
-                            <StackPanel>
-                                <DockPanel Margin="0,0,0,4">
-                                    <TextBlock Text="GATILLO DERECHO (RT / R2)" FontSize="11" FontWeight="Bold" Foreground="#94A3B8"/>
-                                    <TextBlock x:Name="TxtR2Value" Text="0%" FontSize="11" FontWeight="Bold" Foreground="#00E5FF" HorizontalAlignment="Right"/>
-                                </DockPanel>
-                                <ProgressBar x:Name="BarR2" Minimum="0" Maximum="1" Height="12" Foreground="#00E5FF" Background="#1E293B"/>
-                            </StackPanel>
-                        </Border>
-                    </UniformGrid>
-
-                    <!-- Dual Stick 2D Radar Visualizer + Buttons -->
-                    <Grid Grid.Row="2">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-
-                        <UniformGrid Grid.Row="0" Columns="2" Margin="0,0,0,12">
-                            <!-- Left Stick Radar -->
-                            <Border Background="#0B0F17" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,0,6,0">
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                    <TextBlock Text="STICK IZQUIERDO (Raw vs Procesado)" FontSize="11.5" FontWeight="Bold" Foreground="#CBD5E1" HorizontalAlignment="Center" Margin="0,0,0,8"/>
-                                    <Canvas x:Name="CanvasLeftStick" Width="170" Height="170" Background="#111827" ClipToBounds="True">
-                                        <Ellipse Width="168" Height="168" Canvas.Left="1" Canvas.Top="1" Stroke="#334155" StrokeThickness="1.5"/>
-                                        <Line X1="85" Y1="0" X2="85" Y2="170" Stroke="#1E293B" StrokeThickness="1"/>
-                                        <Line X1="0" Y1="85" X2="170" Y2="85" Stroke="#1E293B" StrokeThickness="1"/>
-                                        <!-- Deadzone Circle -->
-                                        <Ellipse x:Name="EllipseLeftDeadzone" Width="28" Height="28" Canvas.Left="71" Canvas.Top="71" Stroke="#EF4444" StrokeThickness="1.5" StrokeDashArray="3,2" Fill="#22EF4444"/>
-                                        <!-- Raw Dot -->
-                                        <Ellipse x:Name="DotLeftRaw" Width="8" Height="8" Canvas.Left="81" Canvas.Top="81" Fill="#64748B"/>
-                                        <!-- Processed Output Dot -->
-                                        <Ellipse x:Name="DotLeftOut" Width="12" Height="12" Canvas.Left="79" Canvas.Top="79" Fill="#00E5FF" Stroke="#FFFFFF" StrokeThickness="1.5"/>
-                                    </Canvas>
-                                    <TextBlock x:Name="TxtLeftStickCoords" Text="Raw: (0.00, 0.00) → Out: (0.00, 0.00)" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- Right Stick Radar -->
-                            <Border Background="#0B0F17" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="10" Padding="10" Margin="6,0,0,0">
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                    <TextBlock Text="STICK DERECHO + GIROSCOPIO" FontSize="11.5" FontWeight="Bold" Foreground="#CBD5E1" HorizontalAlignment="Center" Margin="0,0,0,8"/>
-                                    <Canvas x:Name="CanvasRightStick" Width="170" Height="170" Background="#111827" ClipToBounds="True">
-                                        <Ellipse Width="168" Height="168" Canvas.Left="1" Canvas.Top="1" Stroke="#334155" StrokeThickness="1.5"/>
-                                        <Line X1="85" Y1="0" X2="85" Y2="170" Stroke="#1E293B" StrokeThickness="1"/>
-                                        <Line X1="0" Y1="85" X2="170" Y2="85" Stroke="#1E293B" StrokeThickness="1"/>
-                                        <!-- Deadzone Circle -->
-                                        <Ellipse x:Name="EllipseRightDeadzone" Width="28" Height="28" Canvas.Left="71" Canvas.Top="71" Stroke="#EF4444" StrokeThickness="1.5" StrokeDashArray="3,2" Fill="#22EF4444"/>
-                                        <!-- Raw Dot -->
-                                        <Ellipse x:Name="DotRightRaw" Width="8" Height="8" Canvas.Left="81" Canvas.Top="81" Fill="#64748B"/>
-                                        <!-- Processed Output Dot -->
-                                        <Ellipse x:Name="DotRightOut" Width="12" Height="12" Canvas.Left="79" Canvas.Top="79" Fill="#9D4EDD" Stroke="#FFFFFF" StrokeThickness="1.5"/>
-                                    </Canvas>
-                                    <TextBlock x:Name="TxtRightStickCoords" Text="Raw: (0.00, 0.00) → Out: (0.00, 0.00)" FontSize="11" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-                                </StackPanel>
-                            </Border>
-                        </UniformGrid>
-
-                        <!-- Live Button Matrix -->
-                        <Border Grid.Row="1" Background="#0F141E" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="10">
-                            <StackPanel>
-                                <TextBlock Text="ESTADO DE BOTONES VIRTUALES EN TIEMPO REAL (Incluye Turbo / Macros / Shift)" FontSize="11" FontWeight="Bold" Foreground="#94A3B8" Margin="0,0,0,6"/>
-                                <UniformGrid Columns="6">
-                                    <Border x:Name="PillBtnSouth" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock x:Name="LblBtnSouth" Text="A / ✕" HorizontalAlignment="Center" FontSize="11" FontWeight="Bold"/></Border>
-                                    <Border x:Name="PillBtnEast" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock x:Name="LblBtnEast" Text="B / ○" HorizontalAlignment="Center" FontSize="11" FontWeight="Bold"/></Border>
-                                    <Border x:Name="PillBtnWest" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock x:Name="LblBtnWest" Text="X / □" HorizontalAlignment="Center" FontSize="11" FontWeight="Bold"/></Border>
-                                    <Border x:Name="PillBtnNorth" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock x:Name="LblBtnNorth" Text="Y / △" HorizontalAlignment="Center" FontSize="11" FontWeight="Bold"/></Border>
-                                    <Border x:Name="PillBtnLB" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="LB / L1" HorizontalAlignment="Center" FontSize="11" FontWeight="Bold"/></Border>
-                                    <Border x:Name="PillBtnRB" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="RB / R1" HorizontalAlignment="Center" FontSize="11" FontWeight="Bold"/></Border>
-                                    <Border x:Name="PillBtnBack" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="View / Share" HorizontalAlignment="Center" FontSize="11"/></Border>
-                                    <Border x:Name="PillBtnStart" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="Menu / Opt" HorizontalAlignment="Center" FontSize="11"/></Border>
-                                    <Border x:Name="PillBtnGuide" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="Xbox / PS" HorizontalAlignment="Center" FontSize="11"/></Border>
-                                    <Border x:Name="PillBtnTouchpad" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="Touchpad" HorizontalAlignment="Center" FontSize="11"/></Border>
-                                    <Border x:Name="PillBtnL3" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="L3" HorizontalAlignment="Center" FontSize="11"/></Border>
-                                    <Border x:Name="PillBtnR3" Background="#1E293B" CornerRadius="5" Padding="6,5" Margin="2"><TextBlock Text="R3" HorizontalAlignment="Center" FontSize="11"/></Border>
-                                </UniformGrid>
-                            </StackPanel>
-                        </Border>
-                    </Grid>
-
-                    <!-- Force Feedback & Gyro Live Meters -->
-                    <UniformGrid Grid.Row="3" Columns="3" Margin="0,12,0,0">
-                        <Border Background="#0F141E" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,4,0">
-                            <StackPanel>
-                                <TextBlock Text="Vibración Motor Pesado" FontSize="10.5" Foreground="{StaticResource TextSecondary}"/>
-                                <ProgressBar x:Name="BarRumbleLarge" Minimum="0" Maximum="1" Height="8" Foreground="#F59E0B" Background="#1E293B" Margin="0,4,0,0"/>
-                            </StackPanel>
-                        </Border>
-                        <Border Background="#0F141E" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="2,0,2,0">
-                            <StackPanel>
-                                <TextBlock Text="Vibración Motor Fino" FontSize="10.5" Foreground="{StaticResource TextSecondary}"/>
-                                <ProgressBar x:Name="BarRumbleSmall" Minimum="0" Maximum="1" Height="8" Foreground="#10B981" Background="#1E293B" Margin="0,4,0,0"/>
-                            </StackPanel>
-                        </Border>
-                        <Border Background="#0F141E" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="4,0,0,0">
-                            <StackPanel>
-                                <TextBlock x:Name="TxtGyroTelemetry" Text="Gyro IMU: 0.0°/s | Mouse Δ: (0, 0)" FontSize="10.5" Foreground="#00E5FF"/>
-                                <UniformGrid Columns="2" Margin="0,3,0,0">
-                                    <Button Style="{StaticResource FluentButton}" Click="BtnTestRumble_Click" Padding="4,2" Margin="0,0,2,0" FontSize="10" Content="Probar Vibración"/>
-                                    <Button Style="{StaticResource FluentButton}" Click="BtnTriggerComboMacro_Click" Padding="4,2" Margin="2,0,0,0" FontSize="10" Content="⚡ Macro A→B→X→Y"/>
-                                </UniformGrid>
-                            </StackPanel>
-                        </Border>
-                    </UniformGrid>
+                    <Button x:Name="BtnToggleEngine" Grid.Column="3" Style="{StaticResource Button.PrimaryLg}" VerticalAlignment="Center"
+                            Click="BtnToggleEngine_Click" ToolTip="Iniciar emulación · F5" ToolTipService.ShowOnDisabled="True">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="TxtEngineIcon" Style="{StaticResource Text.IconInline}" Text="&#xE768;"/>
+                            <TextBlock x:Name="TxtEngineLabel" Text="Iniciar emulación"/>
+                        </StackPanel>
+                    </Button>
                 </Grid>
             </Border>
 
-            <!-- RIGHT COLUMN: FULL PROFILE EDITOR (MVVM, see VortexPad.ViewModels) -->
-            <Border Grid.Column="2" Background="{StaticResource BgCard}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="10" Padding="12">
-                <views:ProfileEditorView x:Name="ProfileEditor"/>
-            </Border>
-        </Grid>
+            <!-- ===== Avisos y mensajes ===== -->
+            <StackPanel x:Name="NoticesArea" Grid.Row="1" Margin="24,16,24,0">
+                <ItemsControl x:Name="NoticesBar" ItemTemplate="{StaticResource NoticeTemplate}" Focusable="False"/>
+                <Border x:Name="MessageBar" CornerRadius="{StaticResource Radius.Md}" Padding="12,8" Margin="0,0,0,8" BorderThickness="3,0,0,0"
+                        Background="{StaticResource Brush.InfoSoft}" BorderBrush="{StaticResource Brush.Info}" Visibility="Collapsed"
+                        AutomationProperties.LiveSetting="Polite">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource Button.IconSmall}" Content="&#xE711;" Margin="8,0,0,0"
+                                ToolTip="Ocultar mensaje" AutomationProperties.Name="Ocultar mensaje" Click="MessageDismiss_Click"/>
+                        <TextBlock x:Name="TxtMessageIcon" DockPanel.Dock="Left" Style="{StaticResource Text.Icon}" Text="&#xE946;"
+                                   Foreground="{StaticResource Brush.Info}" Margin="0,0,12,0"/>
+                        <TextBlock x:Name="TxtFooterStatus" Style="{StaticResource Text.Body}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+            </StackPanel>
 
-        <!-- FOOTER BAR -->
-        <Border Grid.Row="3" Margin="0,10,0,0">
-            <DockPanel>
-                <TextBlock x:Name="TxtFooterStatus" Text="VortexPad listo. Motor de 1000Hz activo." FontSize="11.5" Foreground="{StaticResource TextSecondary}"/>
-                <TextBlock Text="Bandeja del sistema (System Tray) activa • ViGEmBus + HidHide Ready" FontSize="11.5" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Right"/>
-            </DockPanel>
-        </Border>
+            <!-- ===== Secciones ===== -->
+            <Grid x:Name="SectionHost" Grid.Row="2">
+
+                <!-- Panel en vivo -->
+                <ScrollViewer x:Name="SecLive" Style="{StaticResource SectionScroll}" Visibility="Visible">
+                    <StackPanel x:Name="PageLive" Margin="{StaticResource Pad.Page}">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <TextBlock Text="Panel en vivo" Style="{StaticResource Text.PageTitle}"/>
+                            <TextBlock Text="Lo que el juego recibe ahora mismo." Style="{StaticResource Text.Secondary}" Margin="12,0,0,3" VerticalAlignment="Bottom"/>
+                        </StackPanel>
+
+                        <!-- Vacío: sin mando -->
+                        <Border x:Name="LiveEmpty" Style="{StaticResource Card}" Padding="32" Margin="{StaticResource Gap.Bottom4}" Visibility="Collapsed">
+                            <StackPanel HorizontalAlignment="Center" MaxWidth="460">
+                                <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE7FC;" FontSize="40" HorizontalAlignment="Center"
+                                           Foreground="{StaticResource Brush.TextMuted}" Margin="0,0,0,12"/>
+                                <TextBlock Text="Conecta un mando" Style="{StaticResource Text.Heading}" HorizontalAlignment="Center"/>
+                                <TextBlock Style="{StaticResource Text.SecondaryWrap}" TextAlignment="Center" Margin="0,8,0,16"
+                                           Text="VortexPad lo detecta solo, por USB o Bluetooth. Funcionan DualSense, DualShock 4, 8BitDo, Xbox y la mayoría de mandos DirectInput."/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <Button Click="BtnRefreshDevices_Click" Margin="0,0,8,0">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE72C;"/><TextBlock Text="Buscar mandos"/></StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource Button.Ghost}" Content="Mi mando no aparece" Click="BtnDeviceHelp_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <!-- Sticks -->
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,12">
+                                            <TextBlock x:Name="TxtSticksSub" DockPanel.Dock="Right" Style="{StaticResource Text.Secondary}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Sticks" Style="{StaticResource Text.Heading}"/>
+                                        </DockPanel>
+                                        <UniformGrid Columns="2">
+                                            <StackPanel HorizontalAlignment="Center">
+                                                <TextBlock Text="Stick izquierdo" Style="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                                                <Canvas x:Name="CanvasLeftStick" Width="170" Height="170" ClipToBounds="True"
+                                                        AutomationProperties.Name="Radar del stick izquierdo">
+                                                    <Ellipse Width="168" Height="168" Canvas.Left="1" Canvas.Top="1" Fill="{StaticResource Brush.Surface2}" Stroke="{StaticResource Brush.LineStrong}" StrokeThickness="1"/>
+                                                    <Line X1="85" Y1="5" X2="85" Y2="165" Stroke="{StaticResource Brush.LineStrong}" StrokeThickness="1" StrokeDashArray="3,4"/>
+                                                    <Line X1="5" Y1="85" X2="165" Y2="85" Stroke="{StaticResource Brush.LineStrong}" StrokeThickness="1" StrokeDashArray="3,4"/>
+                                                    <Ellipse x:Name="EllipseLeftDeadzone" Width="28" Height="28" Canvas.Left="71" Canvas.Top="71" Stroke="{StaticResource Brush.Danger}"
+                                                             StrokeThickness="1.5" StrokeDashArray="3,2" Fill="{StaticResource Brush.DangerSoft}"/>
+                                                    <Ellipse x:Name="DotLeftRaw" Width="8" Height="8" Canvas.Left="81" Canvas.Top="81" Fill="{StaticResource Brush.LiveIn}"/>
+                                                    <Ellipse x:Name="DotLeftOut" Width="12" Height="12" Canvas.Left="79" Canvas.Top="79" Fill="{StaticResource Brush.Accent}"
+                                                             Stroke="{StaticResource Brush.Bg}" StrokeThickness="2"/>
+                                                </Canvas>
+                                                <TextBlock x:Name="TxtLeftStickCoords" Style="{StaticResource Text.Data}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                                            </StackPanel>
+                                            <StackPanel HorizontalAlignment="Center">
+                                                <TextBlock Text="Stick derecho" Style="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                                                <Canvas x:Name="CanvasRightStick" Width="170" Height="170" ClipToBounds="True"
+                                                        AutomationProperties.Name="Radar del stick derecho">
+                                                    <Ellipse Width="168" Height="168" Canvas.Left="1" Canvas.Top="1" Fill="{StaticResource Brush.Surface2}" Stroke="{StaticResource Brush.LineStrong}" StrokeThickness="1"/>
+                                                    <Line X1="85" Y1="5" X2="85" Y2="165" Stroke="{StaticResource Brush.LineStrong}" StrokeThickness="1" StrokeDashArray="3,4"/>
+                                                    <Line X1="5" Y1="85" X2="165" Y2="85" Stroke="{StaticResource Brush.LineStrong}" StrokeThickness="1" StrokeDashArray="3,4"/>
+                                                    <Ellipse x:Name="EllipseRightDeadzone" Width="28" Height="28" Canvas.Left="71" Canvas.Top="71" Stroke="{StaticResource Brush.Danger}"
+                                                             StrokeThickness="1.5" StrokeDashArray="3,2" Fill="{StaticResource Brush.DangerSoft}"/>
+                                                    <Ellipse x:Name="DotRightRaw" Width="8" Height="8" Canvas.Left="81" Canvas.Top="81" Fill="{StaticResource Brush.LiveIn}"/>
+                                                    <Ellipse x:Name="DotRightOut" Width="12" Height="12" Canvas.Left="79" Canvas.Top="79" Fill="{StaticResource Brush.LiveAlt}"
+                                                             Stroke="{StaticResource Brush.Bg}" StrokeThickness="2"/>
+                                                </Canvas>
+                                                <TextBlock x:Name="TxtRightStickCoords" Style="{StaticResource Text.Data}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                                            </StackPanel>
+                                        </UniformGrid>
+                                        <WrapPanel Margin="0,12,0,0" HorizontalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,16,0"><Ellipse Style="{StaticResource Legend}" Fill="{StaticResource Brush.LiveIn}"/><TextBlock Style="{StaticResource Text.Caption}" Text="Entrada física"/></StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,16,0"><Ellipse Style="{StaticResource Legend}" Fill="{StaticResource Brush.Accent}"/><TextBlock Style="{StaticResource Text.Caption}" Text="Salida izquierda"/></StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,16,0"><Ellipse Style="{StaticResource Legend}" Fill="{StaticResource Brush.LiveAlt}"/><TextBlock Style="{StaticResource Text.Caption}" Text="Salida derecha"/></StackPanel>
+                                            <StackPanel Orientation="Horizontal"><Ellipse Style="{StaticResource Legend}" Fill="{StaticResource Brush.Danger}"/><TextBlock Style="{StaticResource Text.Caption}" Text="Zona muerta"/></StackPanel>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Gatillos -->
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <TextBlock Text="Gatillos" Style="{StaticResource Text.Heading}" Margin="{StaticResource Gap.Bottom3}"/>
+                                        <DockPanel Margin="0,0,0,6">
+                                            <TextBlock x:Name="TxtL2Value" DockPanel.Dock="Right" Style="{StaticResource Text.Data}" Foreground="{StaticResource Brush.Text}" Text="0 %"/>
+                                            <TextBlock x:Name="TxtL2Label" Style="{StaticResource Text.Secondary}" Text="Izquierdo · LT"/>
+                                        </DockPanel>
+                                        <ProgressBar x:Name="BarL2" Minimum="0" Maximum="1" Margin="{StaticResource Gap.Bottom3}" AutomationProperties.Name="Gatillo izquierdo"/>
+                                        <DockPanel Margin="0,0,0,6">
+                                            <TextBlock x:Name="TxtR2Value" DockPanel.Dock="Right" Style="{StaticResource Text.Data}" Foreground="{StaticResource Brush.Text}" Text="0 %"/>
+                                            <TextBlock x:Name="TxtR2Label" Style="{StaticResource Text.Secondary}" Text="Derecho · RT"/>
+                                        </DockPanel>
+                                        <ProgressBar x:Name="BarR2" Minimum="0" Maximum="1" AutomationProperties.Name="Gatillo derecho"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Vibración y giroscopio -->
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel Margin="{StaticResource Gap.Bottom3}">
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.GhostSmall}" Click="BtnTestRumble_Click" Content="Probar vibración"/>
+                                            <TextBlock Text="Vibración y giroscopio" Style="{StaticResource Text.Heading}" VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                        <TextBlock Style="{StaticResource Text.Secondary}" Text="Motor grande" Margin="0,0,0,6"/>
+                                        <ProgressBar x:Name="BarRumbleLarge" Minimum="0" Maximum="1" Foreground="{StaticResource Brush.Warn}" Margin="{StaticResource Gap.Bottom3}"
+                                                     AutomationProperties.Name="Vibración del motor grande"/>
+                                        <TextBlock Style="{StaticResource Text.Secondary}" Text="Motor pequeño" Margin="0,0,0,6"/>
+                                        <ProgressBar x:Name="BarRumbleSmall" Minimum="0" Maximum="1" Foreground="{StaticResource Brush.Ok}" Margin="{StaticResource Gap.Bottom3}"
+                                                     AutomationProperties.Name="Vibración del motor pequeño"/>
+                                        <TextBlock x:Name="TxtGyroTelemetry" Style="{StaticResource Text.Data}"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <!-- Botones -->
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <TextBlock Text="Botones del mando virtual" Style="{StaticResource Text.Heading}" Margin="{StaticResource Gap.Bottom3}"/>
+                                        <UniformGrid Columns="6" AutomationProperties.Name="Botones pulsados">
+                                            <Border x:Name="PillBtnSouth" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnSouth" Style="{StaticResource KeyPillText}" Text="A"/></Border>
+                                            <Border x:Name="PillBtnEast" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnEast" Style="{StaticResource KeyPillText}" Text="B"/></Border>
+                                            <Border x:Name="PillBtnWest" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnWest" Style="{StaticResource KeyPillText}" Text="X"/></Border>
+                                            <Border x:Name="PillBtnNorth" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnNorth" Style="{StaticResource KeyPillText}" Text="Y"/></Border>
+                                            <Border x:Name="PillBtnLB" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnLB" Style="{StaticResource KeyPillText}" Text="LB"/></Border>
+                                            <Border x:Name="PillBtnRB" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnRB" Style="{StaticResource KeyPillText}" Text="RB"/></Border>
+                                            <Border x:Name="PillBtnBack" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnBack" Style="{StaticResource KeyPillText}" Text="View"/></Border>
+                                            <Border x:Name="PillBtnStart" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnStart" Style="{StaticResource KeyPillText}" Text="Menu"/></Border>
+                                            <Border x:Name="PillBtnGuide" Style="{StaticResource KeyPill}"><TextBlock x:Name="LblBtnGuide" Style="{StaticResource KeyPillText}" Text="Guía"/></Border>
+                                            <Border x:Name="PillBtnTouchpad" Style="{StaticResource KeyPill}"><TextBlock Style="{StaticResource KeyPillText}" Text="Touch"/></Border>
+                                            <Border x:Name="PillBtnL3" Style="{StaticResource KeyPill}"><TextBlock Style="{StaticResource KeyPillText}" Text="L3"/></Border>
+                                            <Border x:Name="PillBtnR3" Style="{StaticResource KeyPill}"><TextBlock Style="{StaticResource KeyPillText}" Text="R3"/></Border>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Curva -->
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <DockPanel Margin="{StaticResource Gap.Bottom3}">
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.GhostSmall}" Content="Editar curva" Click="BtnEditCurve_Click"/>
+                                            <TextBlock x:Name="TxtLiveCurveTitle" Text="Curva" Style="{StaticResource Text.Heading}" VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                        <views:ResponseCurveControl x:Name="LiveCurve" Height="170"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Telemetría -->
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock Text="Telemetría" Style="{StaticResource Text.Heading}" Margin="{StaticResource Gap.Bottom3}"/>
+                                        <UniformGrid Columns="2">
+                                            <StackPanel Margin="0,0,0,12">
+                                                <TextBlock Text="Polling real" Style="{StaticResource Text.Caption}"/>
+                                                <TextBlock x:Name="TxtPollingHz" Style="{StaticResource Text.DataLg}" Foreground="{StaticResource Brush.Ok}" Text="—"/>
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,12">
+                                                <TextBlock Text="Latencia · jitter" Style="{StaticResource Text.Caption}"/>
+                                                <TextBlock x:Name="TxtLatencyJitter" Style="{StaticResource Text.DataLg}" FontSize="16" Text="—"/>
+                                            </StackPanel>
+                                        </UniformGrid>
+                                        <TextBlock Text="Juego activo" Style="{StaticResource Text.Caption}"/>
+                                        <TextBlock x:Name="TxtActiveProcess" Style="{StaticResource Text.Base}" Text="Ninguno"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Perfiles -->
+                <ScrollViewer x:Name="SecProfiles" Style="{StaticResource SectionScroll}">
+                    <StackPanel Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Click="BtnImportProfile_Click" Margin="0,0,8,0">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE8B5;"/><TextBlock Text="Importar…"/></StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource Button.Primary}" Click="BtnCloneProfile_Click" ToolTip="Crea una copia del perfil activo para editarla">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE710;"/><TextBlock Text="Nuevo perfil"/></StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <TextBlock Text="Perfiles" Style="{StaticResource Text.PageTitle}"/>
+                        </DockPanel>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="340"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Border Style="{StaticResource Card}" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <Grid Margin="{StaticResource Gap.Bottom3}">
+                                        <TextBox x:Name="TxtProfileSearch" TextChanged="TxtProfileSearch_TextChanged" AutomationProperties.Name="Buscar perfil"/>
+                                        <TextBlock Text="Buscar perfil" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Secondary}">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Text, ElementName=TxtProfileSearch}" Value="">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Grid>
+                                    <ListBox x:Name="LstProfiles" MaxHeight="520" SelectionChanged="LstProfiles_SelectionChanged"
+                                             AutomationProperties.Name="Perfiles" VirtualizingPanel.IsVirtualizingWhenGrouping="True">
+                                        <ListBox.GroupStyle>
+                                            <GroupStyle>
+                                                <GroupStyle.HeaderTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding Name}" Style="{StaticResource Text.Label}" Margin="12,12,0,6"/>
+                                                    </DataTemplate>
+                                                </GroupStyle.HeaderTemplate>
+                                            </GroupStyle>
+                                        </ListBox.GroupStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel ToolTip="{Binding Name}">
+                                                    <TextBlock Text="{Binding Name}" Style="{StaticResource Text.Base}"/>
+                                                    <TextBlock Text="{Binding Description}" Style="{StaticResource Text.Caption}"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel x:Name="ProfileDetail" Grid.Column="2">
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <DockPanel Margin="{StaticResource Gap.Bottom4}">
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                                <Button Style="{StaticResource Button.Small}" Click="BtnCloneProfile_Click" Margin="0,0,8,0">
+                                                    <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE8C8;"/><TextBlock Text="Duplicar"/></StackPanel>
+                                                </Button>
+                                                <Button Style="{StaticResource Button.Small}" Click="BtnExportProfile_Click" Margin="0,0,8,0">
+                                                    <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xEDE1;"/><TextBlock Text="Exportar…"/></StackPanel>
+                                                </Button>
+                                                <Button x:Name="BtnDeleteProfile" Style="{StaticResource Button.DangerSmall}" Click="BtnDeleteProfile_Click">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock x:Name="TxtDeleteProfileIcon" Style="{StaticResource Text.IconInline}" Text="&#xE74D;"/>
+                                                        <TextBlock x:Name="TxtDeleteProfileLabel" Text="Borrar"/>
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding Name}" Style="{StaticResource Text.Heading}" VerticalAlignment="Center" ToolTip="{Binding Name}"/>
+                                        </DockPanel>
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="16"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+
+                                            <StackPanel Grid.Row="0" Grid.Column="0" Margin="{StaticResource Gap.Bottom3}">
+                                                <TextBlock Text="Nombre" Style="{StaticResource Text.Secondary}" Foreground="{StaticResource Brush.Text}" Margin="0,0,0,6"/>
+                                                <TextBox Text="{Binding Name, UpdateSourceTrigger=LostFocus}" MaxLength="64" AutomationProperties.Name="Nombre del perfil"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Row="0" Grid.Column="2" Margin="{StaticResource Gap.Bottom3}">
+                                                <TextBlock Text="Mando virtual" Style="{StaticResource Text.Secondary}" Foreground="{StaticResource Brush.Text}" Margin="0,0,0,6"/>
+                                                <ComboBox ItemsSource="{x:Static vm:EditorOptions.TargetControllers}" SelectedValuePath="Value"
+                                                          SelectedValue="{Binding TargetControllerType}" AutomationProperties.Name="Mando virtual"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="{StaticResource Gap.Bottom3}">
+                                                <TextBlock Text="Descripción" Style="{StaticResource Text.Secondary}" Foreground="{StaticResource Brush.Text}" Margin="0,0,0,6"/>
+                                                <TextBox Text="{Binding Description, UpdateSourceTrigger=LostFocus}" TextWrapping="Wrap" AcceptsReturn="True"
+                                                         MinHeight="56" Padding="10,8" VerticalContentAlignment="Top" AutomationProperties.Name="Descripción del perfil"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Row="2" Grid.Column="0" Margin="{StaticResource Gap.Bottom3}">
+                                                <TextBlock Text="Activar al abrir el juego" Style="{StaticResource Text.Secondary}" Foreground="{StaticResource Brush.Text}" Margin="0,0,0,6"/>
+                                                <TextBox Text="{Binding LinkedProcessesText, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Programas que activan el perfil"/>
+                                                <TextBlock Style="{StaticResource Text.SecondaryWrap}" Margin="0,6,0,0"
+                                                           Text="Nombres de .exe separados por coma (por ejemplo eldenring, cod). Se cambia solo cuando el juego pasa a primer plano."/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Row="2" Grid.Column="2" Margin="{StaticResource Gap.Bottom3}">
+                                                <TextBlock Text="Frecuencia de polling" Style="{StaticResource Text.Secondary}" Foreground="{StaticResource Brush.Text}" Margin="0,0,0,6"/>
+                                                <ComboBox ItemsSource="{x:Static vm:EditorOptions.PollingRates}" SelectedValuePath="Value"
+                                                          SelectedValue="{Binding PollingRateHz}" AutomationProperties.Name="Frecuencia de polling"/>
+                                                <TextBlock Style="{StaticResource Text.SecondaryWrap}" Margin="0,6,0,0"
+                                                           Text="1000 Hz da la menor latencia; menos frecuencia consume menos CPU."/>
+                                            </StackPanel>
+                                            <CheckBox Grid.Row="3" Grid.ColumnSpan="3" Style="{StaticResource Switch}" IsChecked="{Binding HidePhysicalControllerWithHidHide}">
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource Text.Base}" Text="Ocultar el mando físico con HidHide al emular"/>
+                                                    <TextBlock Style="{StaticResource Text.Secondary}" Text="Evita que los juegos vean el mando dos veces (físico y virtual)."/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <TextBlock Text="Ajuste automático" Style="{StaticResource Text.Heading}" Margin="0,0,0,4"/>
+                                        <TextBlock x:Name="TxtAiDeviceSignature" Style="{StaticResource Text.SecondaryWrap}" Margin="{StaticResource Gap.Bottom3}"
+                                                   Text="Selecciona un mando para identificarlo."/>
+                                        <TextBlock Text="Ajustar curvas y zonas muertas para" Style="{StaticResource Text.Secondary}" Foreground="{StaticResource Brush.Text}" Margin="0,0,0,6"/>
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="Aplicar" Click="BtnApplyAiGenre_Click" Margin="8,0,0,0"/>
+                                            <ComboBox x:Name="CmbAiGenre" SelectedIndex="0" AutomationProperties.Name="Tipo de juego">
+                                                <ComboBoxItem Content="Shooter competitivo"/>
+                                                <ComboBoxItem Content="Conducción y simulación"/>
+                                                <ComboBoxItem Content="Lucha y arcade"/>
+                                                <ComboBoxItem Content="Soulslike y rol de acción"/>
+                                                <ComboBoxItem Content="Acción general"/>
+                                            </ComboBox>
+                                        </DockPanel>
+                                        <TextBlock x:Name="TxtAiGenreResult" Style="{StaticResource Text.SecondaryWrap}" Margin="0,8,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{StaticResource Brush.InfoSoft}" CornerRadius="{StaticResource Radius.Md}" Padding="12,8">
+                                    <DockPanel>
+                                        <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE946;" Foreground="{StaticResource Brush.Info}" Margin="0,0,12,0"/>
+                                        <TextBlock Style="{StaticResource Text.Body}">
+                                            <Run FontWeight="SemiBold" Text="Los cambios se guardan solos."/>
+                                            <Run Text="Los presets incluidos se pueden editar y restablecer a sus valores de fábrica."/>
+                                        </TextBlock>
+                                    </DockPanel>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Sticks y gatillos -->
+                <ScrollViewer x:Name="SecSticks" Style="{StaticResource SectionScroll}">
+                    <StackPanel x:Name="PageSticks" Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Style="{StaticResource Button.Ghost}" Command="{Binding ResetCurveStickCommand}" Margin="0,0,8,0"
+                                        Visibility="{Binding IsEditingStick, Converter={StaticResource BoolToVis}}"
+                                        ToolTip="Vuelve a los valores por defecto del stick seleccionado">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE72C;"/><TextBlock Text="Restablecer stick"/></StackPanel>
+                                </Button>
+                                <Button x:Name="BtnAiCalibrateDrift" Click="BtnAiCalibrateDrift_Click"
+                                        ToolTip="Mide el reposo de los sticks 2 s y ajusta la zona muerta interior">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE7FC;"/>
+                                        <TextBlock x:Name="TxtCalibrateLabel" Text="Calibrar drift…"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Sticks y gatillos" Style="{StaticResource Text.PageTitle}" VerticalAlignment="Center"/>
+                                <ListBox Style="{StaticResource Segmented}" Margin="16,0,0,0" VerticalAlignment="Center"
+                                         SelectedIndex="{Binding AnalogSelection}" AutomationProperties.Name="Qué se edita">
+                                    <ListBoxItem Content="Stick izquierdo"/>
+                                    <ListBoxItem Content="Stick derecho"/>
+                                    <ListBoxItem Content="Gatillos"/>
+                                </ListBox>
+                            </StackPanel>
+                        </DockPanel>
+                        <Border x:Name="CalibrationPanel" Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Calibración de drift" Style="{StaticResource Text.Heading}" Margin="0,0,0,8"/>
+                                <ProgressBar x:Name="BarCalibration" Minimum="0" Maximum="1" Margin="0,0,0,8" AutomationProperties.Name="Progreso de la calibración"/>
+                                <TextBlock x:Name="TxtAiCalibrationResult" Style="{StaticResource Text.Body}" AutomationProperties.LiveSetting="Polite"/>
+                            </StackPanel>
+                        </Border>
+                        <views:EditorSticksView x:Name="EditorSticks"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Botones y capas -->
+                <ScrollViewer x:Name="SecButtons" Style="{StaticResource SectionScroll}">
+                    <StackPanel Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <TextBlock Text="Botones y capas" Style="{StaticResource Text.PageTitle}"/>
+                        </DockPanel>
+                        <views:EditorButtonsView x:Name="EditorButtons"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Giroscopio -->
+                <ScrollViewer x:Name="SecGyro" Style="{StaticResource SectionScroll}">
+                    <StackPanel Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <TextBlock Text="Giroscopio" Style="{StaticResource Text.PageTitle}"/>
+                        </DockPanel>
+                        <views:EditorGyroView x:Name="EditorGyro"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Vibración y luz -->
+                <ScrollViewer x:Name="SecFeedback" Style="{StaticResource SectionScroll}">
+                    <StackPanel Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <Button DockPanel.Dock="Right" Click="BtnTestRumble_Click" ToolTip="Vibra el mando físico medio segundo">
+                                <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE877;"/><TextBlock Text="Probar vibración"/></StackPanel>
+                            </Button>
+                            <TextBlock Text="Vibración y luz" Style="{StaticResource Text.PageTitle}"/>
+                        </DockPanel>
+                        <views:EditorFeedbackView x:Name="EditorFeedback"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Macros y turbo -->
+                <ScrollViewer x:Name="SecMacros" Style="{StaticResource SectionScroll}">
+                    <StackPanel Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Macros y turbo" Style="{StaticResource Text.PageTitle}"/>
+                                <TextBlock Text="Secuencias que se disparan con un botón del mando." Style="{StaticResource Text.Secondary}" Margin="12,0,0,3" VerticalAlignment="Bottom"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <views:MacrosView x:Name="MacrosEditor"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- DualSense -->
+                <ScrollViewer x:Name="SecDualSense" Style="{StaticResource SectionScroll}">
+                    <StackPanel Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="DualSense" Style="{StaticResource Text.PageTitle}"/>
+                                <TextBlock Text="Touchpad y gatillos adaptativos, por HID nativo." Style="{StaticResource Text.Secondary}" Margin="12,0,0,3" VerticalAlignment="Bottom"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <views:DualSenseView x:Name="EditorDualSense"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Ajustes -->
+                <ScrollViewer x:Name="SecSettings" Style="{StaticResource SectionScroll}">
+                    <StackPanel x:Name="SettingsPanel" Margin="{StaticResource Pad.Page}">
+                        <DockPanel Style="{StaticResource SectionHeader}">
+                            <TextBlock Text="Ajustes" Style="{StaticResource Text.PageTitle}"/>
+                        </DockPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <TextBlock Text="Inicio" Style="{StaticResource Text.Heading}" Margin="0,0,0,4"/>
+                                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding StartWithWindows}" Margin="0,8">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource Text.Base}" Text="Abrir VortexPad al iniciar Windows"/>
+                                                <TextBlock Style="{StaticResource Text.Secondary}" Text="Arranca minimizado en la bandeja."/>
+                                            </StackPanel>
+                                        </CheckBox>
+                                        <Border Style="{StaticResource SettingRow}">
+                                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding StartEmulationOnLaunch}">
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource Text.Base}" Text="Iniciar la emulación al abrir"/>
+                                                    <TextBlock Style="{StaticResource Text.Secondary}" Text="Usa el último mando y perfil."/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </Border>
+                                        <Border Style="{StaticResource SettingRow}">
+                                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding MinimizeToTray}">
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource Text.Base}" Text="Ocultar en la bandeja al minimizar"/>
+                                                    <TextBlock Style="{StaticResource Text.Secondary}" Text="La emulación sigue activa."/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <TextBlock Text="Perfiles" Style="{StaticResource Text.Heading}" Margin="0,0,0,4"/>
+                                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AutoSwitchEnabled}" Margin="0,8">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource Text.Base}" Text="Cambiar de perfil según el juego"/>
+                                                <TextBlock Style="{StaticResource Text.Secondary}" Text="Detecta el programa en primer plano."/>
+                                            </StackPanel>
+                                        </CheckBox>
+                                        <Border Style="{StaticResource SettingRow}">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}" Content="Abrir carpeta" Click="BtnOpenProfilesFolder_Click" Margin="16,0,0,0"/>
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource Text.Base}" Text="Carpeta de perfiles"/>
+                                                    <TextBlock x:Name="TxtProfilesFolder" Style="{StaticResource Text.Data}"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock Text="Atajos de teclado" Style="{StaticResource Text.Heading}" Margin="0,0,0,8"/>
+                                        <DockPanel Margin="0,4">
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource Kbd}"><TextBlock Style="{StaticResource Text.Data}" Foreground="{StaticResource Brush.Text}" Text="F5"/></Border>
+                                            <TextBlock Style="{StaticResource Text.Base}" Text="Iniciar o detener la emulación"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,4">
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource Kbd}"><TextBlock Style="{StaticResource Text.Data}" Foreground="{StaticResource Brush.Text}" Text="Ctrl + 1…5"/></Border>
+                                            <TextBlock Style="{StaticResource Text.Base}" Text="Ir a Panel, Perfiles, Editor, Macros o Ajustes"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,4">
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource Kbd}"><TextBlock Style="{StaticResource Text.Data}" Foreground="{StaticResource Brush.Text}" Text="Ctrl + Tab"/></Border>
+                                            <TextBlock Style="{StaticResource Text.Base}" Text="Siguiente perfil (Mayús para el anterior)"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,4">
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource Kbd}"><TextBlock Style="{StaticResource Text.Data}" Foreground="{StaticResource Brush.Text}" Text="Ctrl + B"/></Border>
+                                            <TextBlock Style="{StaticResource Text.Base}" Text="Contraer o expandir el menú"/>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                                    <StackPanel>
+                                        <TextBlock Text="Controladores" Style="{StaticResource Text.Heading}" Margin="0,0,0,4"/>
+                                        <DockPanel Margin="0,8">
+                                            <ContentControl x:Name="SettingsVigemChip" DockPanel.Dock="Right" Focusable="False" VerticalAlignment="Center"/>
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource Text.Base}" Text="ViGEmBus"/>
+                                                <TextBlock Style="{StaticResource Text.Secondary}" Text="Crea los mandos virtuales."/>
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <Border Style="{StaticResource SettingRow}">
+                                            <DockPanel>
+                                                <ContentControl x:Name="SettingsHidHideChip" DockPanel.Dock="Right" Focusable="False" VerticalAlignment="Center"/>
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource Text.Base}" Text="HidHide"/>
+                                                    <TextBlock Style="{StaticResource Text.SecondaryWrap}" Text="Oculta el mando físico a los juegos para que no lo vean dos veces."/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                        <Button x:Name="BtnRestartAdmin" Style="{StaticResource Button.Small}" HorizontalAlignment="Left" Click="BtnRestartAdmin_Click"
+                                                Visibility="Collapsed" Margin="0,8,0,0">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE7EF;"/><TextBlock Text="Reiniciar como administrador"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,4">
+                                            <TextBlock x:Name="TxtVersion" DockPanel.Dock="Right" Style="{StaticResource Text.Secondary}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Diagnóstico" Style="{StaticResource Text.Heading}"/>
+                                        </DockPanel>
+                                        <CheckBox x:Name="ChkDemoSignal" Style="{StaticResource Switch}" Checked="ChkDemoSignal_Changed" Unchecked="ChkDemoSignal_Changed" Margin="0,8">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource Text.Base}" Text="Señal de prueba (sin mando)"/>
+                                                <TextBlock Style="{StaticResource Text.Secondary}" Text="Mueve los sticks solos para probar el panel y las curvas."/>
+                                            </StackPanel>
+                                        </CheckBox>
+                                        <Border Style="{StaticResource SettingRow}">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}" Content="Abrir registro" Click="BtnOpenLogs_Click" Margin="16,0,0,0"/>
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource Text.Base}" Text="Registro de la app"/>
+                                                    <TextBlock Style="{StaticResource Text.Secondary}" Text="Útil para reportar un problema."/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
     </Grid>
 </Window>

@@ -1,0 +1,168 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:vm="clr-namespace:VortexPad.ViewModels;assembly=VortexPad.ViewModels"
+                    xmlns:views="clr-namespace:VortexPad.App.Views">
+    <!-- Plantillas compartidas por las vistas del editor (gatillos, gatillos adaptativos, capas). -->
+
+    <Style x:Key="FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource Text.Secondary}">
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text}"/>
+        <Setter Property="Margin" Value="0,0,0,6"/>
+    </Style>
+    <Style x:Key="FieldBlock" TargetType="StackPanel">
+        <Setter Property="Margin" Value="0,0,0,12"/>
+    </Style>
+    <Style x:Key="CardTitle" TargetType="TextBlock" BasedOn="{StaticResource Text.Heading}">
+        <Setter Property="Margin" Value="0,0,0,12"/>
+    </Style>
+
+    <!-- ===== Gatillo ===== -->
+    <DataTemplate DataType="{x:Type vm:TriggerViewModel}">
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="{Binding Title}" Style="{StaticResource CardTitle}"/>
+                <views:LabeledSlider Label="Zona muerta interior" Format="percent" Minimum="0" Maximum="0.5" Step="0.005"
+                                     Value="{Binding InnerDeadzone}"/>
+                <views:LabeledSlider Label="Zona muerta exterior" Format="percent" Minimum="0.5" Maximum="1" Step="0.005"
+                                     Value="{Binding OuterDeadzone}"/>
+                <StackPanel Style="{StaticResource FieldBlock}">
+                    <TextBlock Text="Curva de respuesta" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox ItemsSource="{x:Static vm:EditorOptions.CurveTypes}" SelectedValuePath="Value"
+                              SelectedValue="{Binding CurveType}" AutomationProperties.Name="Curva de respuesta del gatillo"/>
+                </StackPanel>
+                <views:LabeledSlider Label="Exponente" Minimum="0.2" Maximum="5" Step="0.05"
+                                     Value="{Binding CurveExponent}"
+                                     Visibility="{Binding UsesExponent, Converter={StaticResource BoolToVis}}"/>
+                <views:LabeledSlider Label="Sensibilidad" Format="{}{0:F2}×" Minimum="0.1" Maximum="3" Step="0.05"
+                                     Value="{Binding Sensitivity}"/>
+                <CheckBox Content="Disparo rápido (pulsa a fondo al pasar el umbral)" IsChecked="{Binding HairTriggerMode}" Margin="0,0,0,8"/>
+                <views:LabeledSlider Label="Umbral del disparo rápido" Format="percent" Minimum="0.01" Maximum="0.9" Step="0.01"
+                                     Value="{Binding HairTriggerThreshold}"
+                                     Visibility="{Binding HairTriggerMode, Converter={StaticResource BoolToVis}}"/>
+            </StackPanel>
+        </Border>
+    </DataTemplate>
+
+    <!-- ===== Gatillo adaptativo (DualSense) ===== -->
+    <DataTemplate DataType="{x:Type vm:AdaptiveTriggerViewModel}">
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="{Binding Title}" Style="{StaticResource CardTitle}"/>
+                <StackPanel Style="{StaticResource FieldBlock}">
+                    <TextBlock Text="Efecto" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox ItemsSource="{x:Static vm:EditorOptions.AdaptiveTriggerModes}" SelectedValuePath="Value"
+                              SelectedValue="{Binding Mode}" AutomationProperties.Name="{Binding Title}"/>
+                </StackPanel>
+                <StackPanel Visibility="{Binding IsEnabled, Converter={StaticResource BoolToVis}}">
+                    <views:LabeledSlider Label="Posición de inicio (0 = suelto, 9 = a fondo)" Format="{}{0:F0}" Minimum="0" Maximum="9" Step="1"
+                                         Value="{Binding StartPosition}"/>
+                    <views:LabeledSlider Label="Posición final del clic" Format="{}{0:F0}" Minimum="3" Maximum="8" Step="1"
+                                         Value="{Binding EndPosition}"
+                                         Visibility="{Binding UsesEnd, Converter={StaticResource BoolToVis}}"/>
+                    <views:LabeledSlider Label="Fuerza" Format="{}{0:F0} / 8" Minimum="1" Maximum="8" Step="1"
+                                         Value="{Binding Strength}"/>
+                    <views:LabeledSlider Label="Frecuencia de vibración" Format="{}{0:F0} Hz" Minimum="1" Maximum="255" Step="1"
+                                         Value="{Binding FrequencyHz}"
+                                         Visibility="{Binding UsesFrequency, Converter={StaticResource BoolToVis}}"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </DataTemplate>
+
+    <!-- ===== Capa de botones ===== -->
+    <DataTemplate DataType="{x:Type vm:MappingLayerViewModel}">
+        <StackPanel>
+            <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                <StackPanel>
+                    <TextBlock Text="Capa" Style="{StaticResource CardTitle}"/>
+                    <StackPanel Style="{StaticResource FieldBlock}">
+                        <TextBlock Text="Nombre" Style="{StaticResource FieldLabel}"/>
+                        <TextBox Text="{Binding Name, UpdateSourceTrigger=LostFocus}" MaxLength="64" AutomationProperties.Name="Nombre de la capa"/>
+                    </StackPanel>
+                    <StackPanel Style="{StaticResource FieldBlock}" Visibility="{Binding IsShiftLayer, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Se activa mientras mantienes" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox ItemsSource="{x:Static vm:EditorOptions.RealButtons}" SelectedValuePath="Value"
+                                  SelectedValue="{Binding ShiftModifierButton}" AutomationProperties.Name="Botón que activa la capa"/>
+                    </StackPanel>
+                    <CheckBox Content="Stick izquierdo como teclas WASD" IsChecked="{Binding LeftStickToWasd}"/>
+                    <CheckBox Content="Stick derecho como ratón" IsChecked="{Binding RightStickToMouse}" Margin="0,0,0,8"/>
+                    <views:LabeledSlider Label="Sensibilidad del ratón" Format="{}{0:F1}" Minimum="1" Maximum="50" Step="0.5"
+                                         Value="{Binding StickMouseSensitivity}"
+                                         Visibility="{Binding RightStickToMouse, Converter={StaticResource BoolToVis}}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                <StackPanel>
+                    <TextBlock Text="Reasignar botones" Style="{StaticResource CardTitle}"/>
+                    <ItemsControl ItemsSource="{Binding Remaps}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0" ItemsSource="{x:Static vm:EditorOptions.RealButtons}"
+                                              SelectedValuePath="Value" SelectedValue="{Binding Source}" AutomationProperties.Name="Botón físico"/>
+                                    <TextBlock Grid.Column="1" Style="{StaticResource Text.Icon}" Text="&#xE72A;" Margin="10,0"
+                                               Foreground="{StaticResource Brush.TextMuted}"/>
+                                    <ComboBox Grid.Column="2" ItemsSource="{x:Static vm:EditorOptions.Buttons}"
+                                              SelectedValuePath="Value" SelectedValue="{Binding Target}" AutomationProperties.Name="Botón del mando virtual"/>
+                                    <Button Grid.Column="3" Style="{StaticResource Button.Icon}" Content="&#xE711;" Margin="8,0,0,0"
+                                            ToolTip="Quitar reasignación" AutomationProperties.Name="Quitar reasignación"
+                                            Command="{Binding DataContext.RemoveRemapCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Style="{StaticResource Button.Small}" HorizontalAlignment="Left" Command="{Binding AddRemapCommand}">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE710;"/><TextBlock Text="Agregar reasignación"/></StackPanel>
+                    </Button>
+                    <Border Background="{StaticResource Brush.WarnSoft}" CornerRadius="{StaticResource Radius.Md}" Padding="12,8" Margin="0,12,0,0"
+                            Visibility="{Binding HasDuplicateSources, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE7BA;" Foreground="{StaticResource Brush.Warn}" Margin="0,0,8,0"/>
+                            <TextBlock Style="{StaticResource Text.Body}" Text="Hay botones físicos repetidos: se usa la última fila."/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Botones como teclas" Style="{StaticResource CardTitle}"/>
+                    <ItemsControl ItemsSource="{Binding KeyBindings}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0" ItemsSource="{x:Static vm:EditorOptions.RealButtons}"
+                                              SelectedValuePath="Value" SelectedValue="{Binding Source}" AutomationProperties.Name="Botón físico"/>
+                                    <TextBlock Grid.Column="1" Style="{StaticResource Text.Icon}" Text="&#xE72A;" Margin="10,0"
+                                               Foreground="{StaticResource Brush.TextMuted}"/>
+                                    <ComboBox Grid.Column="2" ItemsSource="{x:Static vm:VirtualKeyCatalog.Keys}"
+                                              SelectedValuePath="Value" SelectedValue="{Binding VirtualKey}" AutomationProperties.Name="Tecla"/>
+                                    <Button Grid.Column="3" Style="{StaticResource Button.Icon}" Content="&#xE711;" Margin="8,0,0,0"
+                                            ToolTip="Quitar tecla" AutomationProperties.Name="Quitar tecla"
+                                            Command="{Binding DataContext.RemoveKeyBindingCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Style="{StaticResource Button.Small}" HorizontalAlignment="Left" Command="{Binding AddKeyBindingCommand}">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Text.IconInline}" Text="&#xE710;"/><TextBlock Text="Agregar tecla"/></StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </DataTemplate>
+</ResourceDictionary>

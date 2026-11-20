@@ -2,7 +2,7 @@
 
 App de escritorio para Windows en **.NET 8 (C# / WPF)** que reemplaza a XOutput: convierte mandos físicos (DirectInput / HID / DualSense / DualShock 4 / genéricos) en mandos virtuales (Xbox 360 y DualShock 4 vía ViGEmBus, o teclado y ratón vía `SendInput`), con polling de 1000 Hz, curvas de respuesta, giroscopio, macros, HidHide y calibración asistida.
 
-La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
+La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md). El rediseño de la interfaz (R1–R6) está en [docs/PROMPT-REDISENO.md](docs/PROMPT-REDISENO.md) y [docs/rediseno/](docs/rediseno/): usa los tokens y estilos de `Themes/` para cualquier UI nueva, nunca colores literales ni emoji.
 
 ## Comandos
 
@@ -23,8 +23,8 @@ La hoja de ruta por fases está en [docs/PROMPT-FASES.md](docs/PROMPT-FASES.md).
 | `VortexPad.AI` | net8.0 | `SmartMapperAndCalibrator`: identificación VID:PID, calibración de drift 3σ, tuning por género |
 | `VortexPad.Input` | net8.0-windows | `DirectInputAndHidProvider` (Vortice.DirectInput + HidSharp), `SonyHidReaderBase` (hilo propio con snapshot y reconexión) con `DualSenseHidReader` y `DualShock4HidReader`, `HidDeviceWatcher` (hot-plug), `ForegroundGameWatcher` |
 | `VortexPad.Emulation` | net8.0-windows | `ViGEmVirtualControllerService`, `NativeKeyboardMouseInjector` (con sumidero de test interno), `HidHideIntegrationService` (sobre `IHidHideCli`) |
-| `VortexPad.ViewModels` | net8.0 | MVVM (CommunityToolkit.Mvvm): `ProfileEditorViewModel` y sus secciones (sticks, gatillos, gyro, vibración, capas, turbos, macros). Editan el perfil en sitio, validan rangos y avisan con `ProfileEdited` |
-| `VortexPad.App` | net8.0-windows | WPF `MainWindow` (code-behind para motor, dispositivos y visualizador) + `Views/ProfileEditorView` (MVVM) + icono de bandeja |
+| `VortexPad.ViewModels` | net8.0 | MVVM (CommunityToolkit.Mvvm): `ProfileEditorViewModel` y sus secciones (sticks, gatillos, gyro, vibración, capas, turbos, macros). Editan el perfil en sitio, validan rangos y avisan con `ProfileEdited`. Shell: `NavigationState` (secciones, Ctrl+1…5, riel colapsado), `StatusItem` (chips) y `Autosaver<T>` (autoguardado con debounce de 800 ms) |
+| `VortexPad.App` | net8.0-windows | WPF `MainWindow`: riel de navegación + barra de estado con chips + secciones (code-behind para motor, dispositivos y panel en vivo). Editor en `Views/Editor*View`, `MacrosView`, `DualSenseView` (MVVM) y `ResponseCurveControl`. Tema en `Themes/Tokens.xaml` + `Themes/Controls.xaml` (único sitio con colores literales). Icono de bandeja |
 | `VortexPad.CoreTests` | net8.0 | xUnit; referencia Core, AI y ViewModels |
 | `VortexPad.WindowsTests` | net8.0-windows | xUnit para Input/Emulation con fakes (`FakeHidHideCli` simula el driver); accede a internos vía `InternalsVisibleTo` |
 

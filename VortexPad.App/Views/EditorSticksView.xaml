@@ -1,0 +1,93 @@
+<UserControl x:Class="VortexPad.App.Views.EditorSticksView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:VortexPad.ViewModels;assembly=VortexPad.ViewModels"
+             xmlns:views="clr-namespace:VortexPad.App.Views">
+    <!-- Sección «Sticks y gatillos». DataContext = ProfileEditorViewModel. -->
+    <UserControl.Resources>
+        <ResourceDictionary Source="EditorTemplates.xaml"/>
+    </UserControl.Resources>
+
+    <Grid>
+        <!-- ===== Stick seleccionado ===== -->
+        <Grid Visibility="{Binding IsEditingStick, Converter={StaticResource BoolToVis}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.35*"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource Card}" VerticalAlignment="Top" DataContext="{Binding CurveStick}">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,12">
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Secondary}" VerticalAlignment="Center"
+                                   Text="Arrastra los puntos o usa las flechas" Visibility="{Binding IsBezier, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Style="{StaticResource Text.Heading}">
+                            <Run Text="Curva de respuesta ·"/> <Run Text="{Binding Title, Mode=OneWay}"/>
+                        </TextBlock>
+                    </DockPanel>
+                    <StackPanel Style="{StaticResource FieldBlock}">
+                        <TextBlock Text="Tipo de curva" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox ItemsSource="{x:Static vm:EditorOptions.CurveTypes}" SelectedValuePath="Value"
+                                  SelectedValue="{Binding CurveType}" AutomationProperties.Name="Tipo de curva"/>
+                    </StackPanel>
+                    <views:ResponseCurveControl x:Name="Curve" Height="260" IsEditable="True" Stick="{Binding}" Margin="0,0,0,12"/>
+                    <views:LabeledSlider Label="Exponente" Minimum="0.2" Maximum="5" Step="0.05"
+                                         Value="{Binding CurveExponent}"
+                                         Visibility="{Binding UsesExponent, Converter={StaticResource BoolToVis}}"/>
+                    <StackPanel Visibility="{Binding IsBezier, Converter={StaticResource BoolToVis}}">
+                        <views:LabeledSlider Label="Punto 1 de la curva" Format="percent" Minimum="0" Maximum="1" Value="{Binding BezierP1}"/>
+                        <views:LabeledSlider Label="Punto 2 de la curva" Format="percent" Minimum="0" Maximum="1" Value="{Binding BezierP2}"/>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Text.SecondaryWrap}"
+                               Text="El punto blanco sigue al stick en vivo. La diagonal punteada es la respuesta lineal."/>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Grid.Column="2" DataContext="{Binding CurveStick}">
+                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Bottom4}">
+                    <StackPanel>
+                        <TextBlock Text="Zona muerta" Style="{StaticResource CardTitle}"/>
+                        <StackPanel Style="{StaticResource FieldBlock}">
+                            <TextBlock Text="Forma" Style="{StaticResource FieldLabel}"/>
+                            <ComboBox ItemsSource="{x:Static vm:EditorOptions.DeadzoneModes}" SelectedValuePath="Value"
+                                      SelectedValue="{Binding DeadzoneMode}" AutomationProperties.Name="Forma de la zona muerta"/>
+                        </StackPanel>
+                        <views:LabeledSlider Label="Interior" Format="percent" Minimum="0" Maximum="0.5" Step="0.005"
+                                             Value="{Binding InnerDeadzone}"/>
+                        <views:LabeledSlider Label="Por eje" Format="percent" Minimum="0" Maximum="0.3" Step="0.005"
+                                             Value="{Binding AxialDeadzone}"
+                                             Visibility="{Binding UsesAxialDeadzone, Converter={StaticResource BoolToVis}}"/>
+                        <views:LabeledSlider Label="Exterior" Format="percent" Minimum="0.5" Maximum="1" Step="0.005"
+                                             Value="{Binding OuterDeadzone}"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Sensibilidad y ejes" Style="{StaticResource CardTitle}"/>
+                        <views:LabeledSlider Label="Sensibilidad" Format="{}{0:F2}×" Minimum="0.1" Maximum="3" Step="0.05"
+                                             Value="{Binding Sensitivity}"/>
+                        <views:LabeledSlider Label="Anti zona muerta del juego" Format="percent" Minimum="0" Maximum="0.5" Step="0.005"
+                                             Value="{Binding AntiDeadzone}"/>
+                        <WrapPanel>
+                            <CheckBox Content="Invertir eje X" IsChecked="{Binding InvertX}" Margin="0,0,24,0"/>
+                            <CheckBox Content="Invertir eje Y" IsChecked="{Binding InvertY}"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <!-- ===== Gatillos ===== -->
+        <Grid Visibility="{Binding IsEditingTriggers, Converter={StaticResource BoolToVis}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <ContentControl Grid.Column="0" Content="{Binding LeftTrigger}" Focusable="False" VerticalAlignment="Top"/>
+            <ContentControl Grid.Column="2" Content="{Binding RightTrigger}" Focusable="False" VerticalAlignment="Top"/>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -28,6 +28,7 @@ public sealed class ProfileEditorViewModel : EditableViewModel
         RemoveTurboCommand = new RelayCommand<TurboViewModel>(RemoveTurbo);
         AddMacroCommand = new RelayCommand(AddMacro);
         RemoveMacroCommand = new RelayCommand<MacroViewModel>(RemoveMacro);
+        ResetCurveStickCommand = new RelayCommand(() => CurveStick.ResetToDefaults());
         Load(_profile);
     }
 
@@ -60,6 +61,8 @@ public sealed class ProfileEditorViewModel : EditableViewModel
     public IRelayCommand<TurboViewModel> RemoveTurboCommand { get; }
     public IRelayCommand AddMacroCommand { get; }
     public IRelayCommand<MacroViewModel> RemoveMacroCommand { get; }
+    /// <summary>Restores the defaults of the stick shown in the curve.</summary>
+    public IRelayCommand ResetCurveStickCommand { get; }
 
     public MacroViewModel? SelectedMacro
     {
@@ -85,6 +88,32 @@ public sealed class ProfileEditorViewModel : EditableViewModel
     }
 
     public StickViewModel CurveStick => _curveStickIndex == 0 ? LeftStick : RightStick;
+
+    private bool _editingTriggers;
+
+    /// <summary>
+    /// Selector of the "Sticks y gatillos" section: 0 = left stick, 1 = right stick, 2 = triggers.
+    /// Choosing the triggers keeps the last stick in the curve.
+    /// </summary>
+    public int AnalogSelection
+    {
+        get => _editingTriggers ? 2 : _curveStickIndex;
+        set
+        {
+            bool triggers = value == 2;
+            if (!triggers) CurveStickIndex = value;
+            if (_editingTriggers != triggers)
+            {
+                _editingTriggers = triggers;
+                OnPropertyChanged(nameof(IsEditingTriggers));
+                OnPropertyChanged(nameof(IsEditingStick));
+            }
+            OnPropertyChanged();
+        }
+    }
+
+    public bool IsEditingTriggers => _editingTriggers;
+    public bool IsEditingStick => !_editingTriggers;
 
     /// <summary>All layers (base + Shift) for the layer selector.</summary>
     public IEnumerable<MappingLayerViewModel> AllLayers => new[] { BaseLayer }.Concat(ShiftLayers);

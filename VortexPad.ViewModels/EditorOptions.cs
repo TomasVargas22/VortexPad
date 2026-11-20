@@ -57,10 +57,10 @@ public static class EditorOptions
     public static IReadOnlyList<EnumOption<ControllerButton>> Buttons { get; } = new[]
     {
         new EnumOption<ControllerButton>(ControllerButton.None, "(ninguno)"),
-        new EnumOption<ControllerButton>(ControllerButton.South, "A / ✕"),
-        new EnumOption<ControllerButton>(ControllerButton.East, "B / ○"),
-        new EnumOption<ControllerButton>(ControllerButton.West, "X / □"),
-        new EnumOption<ControllerButton>(ControllerButton.North, "Y / △"),
+        new EnumOption<ControllerButton>(ControllerButton.South, "A / Cruz"),
+        new EnumOption<ControllerButton>(ControllerButton.East, "B / Círculo"),
+        new EnumOption<ControllerButton>(ControllerButton.West, "X / Cuadrado"),
+        new EnumOption<ControllerButton>(ControllerButton.North, "Y / Triángulo"),
         new EnumOption<ControllerButton>(ControllerButton.LeftShoulder, "LB / L1"),
         new EnumOption<ControllerButton>(ControllerButton.RightShoulder, "RB / R1"),
         new EnumOption<ControllerButton>(ControllerButton.Back, "View / Share"),

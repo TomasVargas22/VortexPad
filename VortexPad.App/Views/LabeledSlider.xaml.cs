@@ -21,7 +21,9 @@ public partial class LabeledSlider : System.Windows.Controls.UserControl
         DependencyProperty.Register(nameof(Maximum), typeof(double), typeof(LabeledSlider), new PropertyMetadata(1.0));
 
     public static readonly DependencyProperty StepProperty =
-        DependencyProperty.Register(nameof(Step), typeof(double), typeof(LabeledSlider), new PropertyMetadata(0.01));
+        DependencyProperty.Register(nameof(Step), typeof(double), typeof(LabeledSlider), new PropertyMetadata(0.01,
+            // Page Up / Page Down = ten small steps (keyboard spec in especificacion.md)
+            (d, e) => ((LabeledSlider)d).Part.LargeChange = (double)e.NewValue * 10));
 
     /// <summary>
     /// Value format: "percent" (0.08 → 8.0 %), or a .NET format string with {0} (e.g. "{0:F2}", "{0:F0} Hz").
@@ -38,6 +40,7 @@ public partial class LabeledSlider : System.Windows.Controls.UserControl
     public LabeledSlider()
     {
         InitializeComponent();
+        Part.LargeChange = Step * 10;
         UpdateDisplay();
     }
 
